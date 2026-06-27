@@ -10,7 +10,516 @@ from tkinter import ttk, filedialog, messagebox
 import numpy as np
 import rasterio
 from rasterio.transform import from_origin
+from rasterio.warp import calculate_default_transform, reproject, Resampling, transform_bounds
+from rasterio.merge import merge as rio_merge
 import re
+import tempfile
+import json
+
+MAP_HTML_TEMPLATE = """<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>DEM 変換結果マップ</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&family=Noto+Sans+JP:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #2563eb;
+            --primary-hover: #1d4ed8;
+            --bg-glass: rgba(255, 255, 255, 0.85);
+            --border-glass: rgba(255, 255, 255, 0.4);
+            --shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.15);
+            --text: #1f2937;
+            --text-muted: #4b5563;
+        }
+
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            font-family: 'Outfit', 'Noto Sans JP', sans-serif;
+            color: var(--text);
+            overflow: hidden;
+        }
+
+        #map {
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            z-index: 1;
+        }
+
+        /* Glassmorphic Side Panel */
+        .dashboard {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            width: 380px;
+            max-height: calc(100% - 40px);
+            background: var(--bg-glass);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid var(--border-glass);
+            border-radius: 16px;
+            box-shadow: var(--shadow);
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            transition: all 0.3s ease;
+        }
+
+        .dashboard-header {
+            padding: 20px;
+            background: linear-gradient(135deg, rgba(37, 99, 235, 0.1) 0%, rgba(37, 99, 235, 0.02) 100%);
+            border-bottom: 1px solid var(--border-glass);
+        }
+
+        .dashboard-title {
+            margin: 0 0 5px 0;
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: var(--primary);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .dashboard-subtitle {
+            margin: 0;
+            font-size: 0.85rem;
+            color: var(--text-muted);
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+            padding: 15px 20px;
+            border-bottom: 1px solid var(--border-glass);
+            background: rgba(255, 255, 255, 0.5);
+        }
+
+        .stat-card {
+            padding: 8px 12px;
+            background: rgba(255, 255, 255, 0.6);
+            border: 1px solid rgba(255, 255, 255, 0.8);
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 1.2rem;
+            font-weight: 700;
+            color: var(--primary);
+        }
+
+        .stat-label {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
+
+        .search-container {
+            padding: 15px 20px 10px 20px;
+            position: relative;
+        }
+
+        .search-input {
+            width: 100%;
+            padding: 10px 12px 10px 35px;
+            border: 1px solid rgba(0, 0, 0, 0.1);
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.9);
+            box-sizing: border-box;
+            font-family: inherit;
+            font-size: 0.9rem;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        .search-input:focus {
+            border-color: var(--primary);
+        }
+
+        .search-icon {
+            position: absolute;
+            left: 32px;
+            top: 25px;
+            color: var(--text-muted);
+            pointer-events: none;
+        }
+
+        .file-list-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 0 20px 20px 20px;
+        }
+
+        .file-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .file-item {
+            padding: 10px 12px;
+            background: rgba(255, 255, 255, 0.5);
+            border: 1px solid rgba(0, 0, 0, 0.05);
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .file-item:hover {
+            background: rgba(37, 99, 235, 0.08);
+            border-color: rgba(37, 99, 235, 0.2);
+            transform: translateY(-1px);
+        }
+
+        .file-name {
+            font-size: 0.85rem;
+            font-weight: 500;
+            text-overflow: ellipsis;
+            overflow: hidden;
+            white-space: nowrap;
+            max-width: 230px;
+        }
+
+        .file-tag {
+            font-size: 0.7rem;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-weight: 600;
+        }
+
+        .tag-mesh {
+            background: rgba(37, 99, 235, 0.1);
+            color: var(--primary);
+        }
+
+        .tag-merged {
+            background: rgba(234, 88, 12, 0.1);
+            color: #ea580c;
+        }
+
+        /* Leaflet Controls Styling */
+        .leaflet-bar {
+            box-shadow: var(--shadow) !important;
+            border: 1px solid var(--border-glass) !important;
+            border-radius: 8px !important;
+            overflow: hidden;
+        }
+
+        .leaflet-bar a {
+            background: var(--bg-glass) !important;
+            backdrop-filter: blur(8px);
+            border-bottom: 1px solid var(--border-glass) !important;
+            color: var(--text) !important;
+            transition: background-color 0.2s;
+        }
+
+        .leaflet-bar a:hover {
+            background: rgba(255, 255, 255, 0.95) !important;
+            color: var(--primary) !important;
+        }
+
+        /* Popup Styling */
+        .custom-popup .leaflet-popup-content-wrapper {
+            background: var(--bg-glass);
+            backdrop-filter: blur(10px);
+            border: 1px solid var(--border-glass);
+            border-radius: 12px;
+            box-shadow: var(--shadow);
+            color: var(--text);
+            font-family: inherit;
+        }
+
+        .custom-popup .leaflet-popup-tip {
+            background: var(--bg-glass);
+            border: 1px solid var(--border-glass);
+        }
+
+        .popup-title {
+            font-size: 0.95rem;
+            font-weight: 700;
+            color: var(--primary);
+            margin: 0 0 8px 0;
+            border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+            padding-bottom: 5px;
+        }
+
+        .popup-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.8rem;
+            margin-bottom: 4px;
+        }
+
+        .popup-label {
+            color: var(--text-muted);
+            font-weight: 500;
+        }
+
+        .popup-value {
+            font-weight: 600;
+            text-align: right;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="map"></div>
+
+    <div class="dashboard">
+        <div class="dashboard-header">
+            <h1 class="dashboard-title">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle;"><polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"></polygon><line x1="9" y1="3" x2="9" y2="18"></line><line x1="15" y1="6" x2="15" y2="21"></line></svg>
+                DEM 変換結果マップ
+            </h1>
+            <p class="dashboard-subtitle">国土地理院 基盤地図情報 DEM 変換結果</p>
+        </div>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div id="stat-count" class="stat-value">-</div>
+                <div class="stat-label">総メッシュ数</div>
+            </div>
+            <div class="stat-card">
+                <div id="stat-type" class="stat-value">-</div>
+                <div class="stat-label">出力形式</div>
+            </div>
+        </div>
+
+        <div class="search-container">
+            <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+            <input type="text" id="search" class="search-input" placeholder="メッシュコードで検索...">
+        </div>
+
+        <div class="file-list-container">
+            <ul id="file-list" class="file-list">
+                <!-- Dynamic File Items -->
+            </ul>
+        </div>
+    </div>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <!-- Load dem_layout.js -->
+    <script src="dem_layout.js"></script>
+    <script>
+        // Check if data is loaded
+        if (typeof demLayoutData === 'undefined') {
+            alert('Error: dem_layout.js could not be loaded.');
+        }
+
+        // Initialize Map centered on Japan
+        const map = L.map('map', {
+            zoomControl: false
+        }).setView([36.2048, 138.2529], 5);
+
+        // Add Zoom Control at top-right
+        L.control.zoom({
+            position: 'topright'
+        }).addTo(map);
+
+        // GSI Standard Map Layer
+        const gsiStdLayer = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png', {
+            maxZoom: 18,
+            attribution: '&copy; <a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank">国土地理院</a>'
+        }).addTo(map);
+
+        // Layers for features
+        const sourceLayerGroup = L.geoJSON(demLayoutData, {
+            filter: function(feature) {
+                return feature.properties.type === 'source_mesh';
+            },
+            style: function(feature) {
+                return {
+                    color: '#2563eb',
+                    weight: 2,
+                    fillColor: '#3b82f6',
+                    fillOpacity: 0.15,
+                    dashArray: ''
+                };
+            },
+            onEachFeature: onEachFeature
+        }).addTo(map);
+
+        const mergedLayerGroup = L.geoJSON(demLayoutData, {
+            filter: function(feature) {
+                return feature.properties.type === 'merged_file';
+            },
+            style: function(feature) {
+                return {
+                    color: '#ea580c',
+                    weight: 3,
+                    fillColor: 'none',
+                    fillOpacity: 0,
+                    dashArray: '5, 8'
+                };
+            },
+            onEachFeature: onEachFeature
+        }).addTo(map);
+
+        // Fit Bounds
+        const allBounds = L.featureGroup([sourceLayerGroup, mergedLayerGroup]).getBounds();
+        if (allBounds.isValid()) {
+            map.fitBounds(allBounds, { padding: [50, 50] });
+        }
+
+        // Map interactions
+        function onEachFeature(feature, layer) {
+            // Popup HTML
+            let popupContent = '<div class="custom-popup">';
+            if (feature.properties.type === 'merged_file') {
+                popupContent += '<div class="popup-title">結合 GeoTIFF</div>';
+            } else {
+                popupContent += '<div class="popup-title">出力メッシュ</div>';
+            }
+            popupContent += '<div class="popup-row"><span class="popup-label">ファイル名:</span><span class="popup-value">' + feature.properties.filename + '</span></div>';
+            popupContent += '<div class="popup-row"><span class="popup-label">識別コード:</span><span class="popup-value">' + feature.properties.mesh_code + '</span></div>';
+            
+            // Get coordinates
+            const coords = feature.geometry.coordinates[0];
+            const lonMin = coords[0][0].toFixed(5);
+            const latMin = coords[0][1].toFixed(5);
+            const lonMax = coords[2][0].toFixed(5);
+            const latMax = coords[2][1].toFixed(5);
+            popupContent += '<div class="popup-row"><span class="popup-label">範囲 (南西):</span><span class="popup-value">' + latMin + ', ' + lonMin + '</span></div>';
+            popupContent += '<div class="popup-row"><span class="popup-label">範囲 (北東):</span><span class="popup-value">' + latMax + ', ' + lonMax + '</span></div>';
+            popupContent += '</div>';
+
+            layer.bindPopup(popupContent, {
+                className: 'custom-popup'
+            });
+
+            // Tooltip for quick hover info
+            layer.bindTooltip(feature.properties.mesh_code, {
+                permanent: false,
+                direction: 'center',
+                className: 'mesh-tooltip'
+            });
+
+            // Highlight on hover
+            layer.on({
+                mouseover: function(e) {
+                    const l = e.target;
+                    if (feature.properties.type === 'source_mesh') {
+                        l.setStyle({
+                            weight: 3,
+                            color: '#fbbf24',
+                            fillColor: '#fbbf24',
+                            fillOpacity: 0.3
+                        });
+                    } else {
+                        l.setStyle({
+                            weight: 4,
+                            color: '#ef4444'
+                        });
+                    }
+                    if (!L.Browser.ie && !L.Browser.opera && !L.Browser.edge) {
+                        l.bringToFront();
+                    }
+                },
+                mouseout: function(e) {
+                    if (feature.properties.type === 'source_mesh') {
+                        sourceLayerGroup.resetStyle(e.target);
+                    } else {
+                        mergedLayerGroup.resetStyle(e.target);
+                    }
+                },
+                click: function(e) {
+                    map.fitBounds(e.target.getBounds(), { padding: [100, 100] });
+                }
+            });
+        }
+
+        // Render Panel list and stats
+        const features = demLayoutData.features;
+        const sourceFeatures = features.filter(f => f.properties.type === 'source_mesh');
+        const hasMerged = features.some(f => f.properties.type === 'merged_file');
+
+        document.getElementById('stat-count').innerText = sourceFeatures.length;
+        document.getElementById('stat-type').innerText = hasMerged ? '結合 (1枚)' : '個別';
+
+        const fileListUl = document.getElementById('file-list');
+
+        function renderList(filterText = '') {
+            fileListUl.innerHTML = '';
+            
+            // First render merged if it exists
+            features.forEach((feat, index) => {
+                const props = feat.properties;
+                if (props.type === 'merged_file') {
+                    createListItem(feat, 'tag-merged', '結合');
+                }
+            });
+
+            // Then render source meshes matching search
+            features.forEach((feat, index) => {
+                const props = feat.properties;
+                if (props.type === 'source_mesh') {
+                    if (props.mesh_code.toLowerCase().includes(filterText.toLowerCase())) {
+                        createListItem(feat, 'tag-mesh', 'メッシュ');
+                    }
+                }
+            });
+        }
+
+        function createListItem(feat, tagClass, tagLabel) {
+            const props = feat.properties;
+            const li = document.createElement('li');
+            li.className = 'file-item';
+            li.innerHTML = `
+                <div class="file-name" title="` + props.filename + `">` + props.filename + `</div>
+                <div class="file-tag ` + tagClass + `">` + tagLabel + `</div>
+            `;
+            
+            li.addEventListener('click', () => {
+                // Find matching layer
+                let targetLayer = null;
+                sourceLayerGroup.eachLayer(l => {
+                    if (l.feature.properties.filename === props.filename) targetLayer = l;
+                });
+                mergedLayerGroup.eachLayer(l => {
+                    if (l.feature.properties.filename === props.filename) targetLayer = l;
+                });
+
+                if (targetLayer) {
+                    map.fitBounds(targetLayer.getBounds(), { padding: [100, 100] });
+                    targetLayer.openPopup();
+                }
+            });
+
+            fileListUl.appendChild(li);
+        }
+
+        // Search binder
+        document.getElementById('search').addEventListener('input', (e) => {
+            renderList(e.target.value);
+        });
+
+        // Initial render
+        renderList();
+    </script>
+</body>
+</html>
+"""
 
 def parse_mesh_code(filename):
     """ファイル名から4桁の1次メッシュコードを抽出し、概略の中心緯度経度を返す"""
@@ -91,8 +600,8 @@ def estimate_jgd_zone(lat, lon):
             return 10
         return 9
 
-def parse_coords_from_xml_content_extended(xml_content):
-    """XML文字列から Envelope を解析し、中心の緯度経度と、元データがJGD2000かどうかを返す"""
+def parse_xml_metadata(xml_content):
+    """XML文字列から境界座標(lat_min, lon_min, lat_max, lon_max)、グリッド解像度、SRS名などを解析して辞書で返す"""
     root = ET.fromstring(xml_content)
     FGD_NS = '{http://fgd.gsi.go.jp/spec/2008/FGD_GMLSchema}'
     GML_NS = '{http://www.opengis.net/gml/3.2}'
@@ -131,7 +640,47 @@ def parse_coords_from_xml_content_extended(xml_content):
         lat_min, lon_min = c1_low, c2_low
         lat_max, lon_max = c1_up, c2_up
 
-    return (lat_min + lat_max) / 2.0, (lon_min + lon_max) / 2.0, is_jgd2000
+    # グリッドサイズも取得
+    grid_envelope = coverage_elem.find(f'.//{GML_NS}GridEnvelope')
+    width, height = 1, 1
+    if grid_envelope is not None:
+        low_elem = grid_envelope.find(f'.//{GML_NS}low')
+        high_elem = grid_envelope.find(f'.//{GML_NS}high')
+        if low_elem is not None and high_elem is not None:
+            low_x, low_y = map(int, low_elem.text.strip().split())
+            high_x, high_y = map(int, high_elem.text.strip().split())
+            width = high_x - low_x + 1
+            height = high_y - low_y + 1
+
+    return {
+        'lat_min': lat_min,
+        'lon_min': lon_min,
+        'lat_max': lat_max,
+        'lon_max': lon_max,
+        'width': width,
+        'height': height,
+        'is_jgd2000': is_jgd2000,
+        'srs_name': srs_name
+    }
+
+def extract_mesh_code(filename):
+    """ファイル名からメッシュコード（図郭番号）を抽出する"""
+    match = re.search(r'\b(\d{4}-\d{2}-\d{2})\b', filename)
+    if match:
+        return match.group(1)
+    match = re.search(r'\b(\d{8})\b', filename)
+    if match:
+        return match.group(1)
+    match = re.search(r'\b(\d{4}-\d{2})\b', filename)
+    if match:
+        return match.group(1)
+    match = re.search(r'\b(\d{6})\b', filename)
+    if match:
+        return match.group(1)
+    match = re.search(r'\b(\d{4})\b', filename)
+    if match:
+        return match.group(1)
+    return os.path.splitext(filename)[0]
 
 def scan_input_directory_for_crs(input_dir):
     """入力フォルダをスキャンし、最初に見つかったXML等から推奨の系番号(1〜19)、元データがJGD2000かどうか、座標を返す"""
@@ -153,10 +702,12 @@ def scan_input_directory_for_crs(input_dir):
                 try:
                     with open(file_path, 'r', encoding='utf-8', errors='ignore') as file_obj:
                         xml_content = file_obj.read()
-                    lat, lon, is_jgd2000 = parse_coords_from_xml_content_extended(xml_content)
+                    meta = parse_xml_metadata(xml_content)
+                    lat = (meta['lat_min'] + meta['lat_max']) / 2.0
+                    lon = (meta['lon_min'] + meta['lon_max']) / 2.0
                     zone = estimate_jgd_zone(lat, lon)
                     if zone:
-                        return zone, is_jgd2000, lat, lon
+                        return zone, meta['is_jgd2000'], lat, lon
                 except Exception:
                     pass
             elif ext == '.zip':
@@ -165,10 +716,12 @@ def scan_input_directory_for_crs(input_dir):
                         xml_members = [name for name in zf.namelist() if name.lower().endswith('.xml')]
                         if xml_members:
                             xml_content = zf.read(xml_members[0]).decode('utf-8', errors='ignore')
-                            lat, lon, is_jgd2000 = parse_coords_from_xml_content_extended(xml_content)
+                            meta = parse_xml_metadata(xml_content)
+                            lat = (meta['lat_min'] + meta['lat_max']) / 2.0
+                            lon = (meta['lon_min'] + meta['lon_max']) / 2.0
                             zone = estimate_jgd_zone(lat, lon)
                             if zone:
-                                return zone, is_jgd2000, lat, lon
+                                return zone, meta['is_jgd2000'], lat, lon
                 except Exception:
                     pass
     return None
@@ -177,8 +730,11 @@ class ConverterApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("国土地理院 DEM XML -> GeoTIFF 変換ツール")
-        self.geometry("700x550")
-        self.minsize(600, 450)
+        self.geometry("700x700")
+        self.minsize(600, 600)
+        self.scanned_metadata_cache = []
+        self.metadata_scan_thread_active = False
+        self.muni_map = {}
         self.setup_ui()
         self.processing = False
 
@@ -217,6 +773,40 @@ class ConverterApp(tk.Tk):
 
         folder_frame.columnconfigure(1, weight=1)
 
+        # Municipality Filter frame
+        muni_frame = ttk.LabelFrame(main_frame, text="市区町村フィルター (非必須)", padding="10")
+        muni_frame.pack(fill=tk.X, pady=(0, 15))
+
+        # CSV file selection
+        ttk.Label(muni_frame, text="メッシュCSV:").grid(row=0, column=0, sticky=tk.W, pady=5)
+        self.muni_csv_var = tk.StringVar()
+        self.muni_csv_entry = ttk.Entry(muni_frame, textvariable=self.muni_csv_var, width=50)
+        self.muni_csv_entry.grid(row=0, column=1, padx=5, pady=5, sticky=tk.EW)
+        self.muni_csv_btn = ttk.Button(muni_frame, text="参照...", command=self.browse_muni_csv)
+        self.muni_csv_btn.grid(row=0, column=2, padx=5, pady=5)
+
+        # Municipality dropdown
+        ttk.Label(muni_frame, text="対象市区町村:").grid(row=1, column=0, sticky=tk.W, pady=5)
+        self.muni_select_var = tk.StringVar()
+        self.muni_combo = ttk.Combobox(muni_frame, textvariable=self.muni_select_var, state="disabled", width=30)
+        self.muni_combo.grid(row=1, column=1, padx=5, pady=5, sticky=tk.W)
+        self.muni_combo.bind("<<ComboboxSelected>>", self.on_muni_selected)
+
+        # Filter enable checkbox
+        self.muni_filter_enabled_var = tk.BooleanVar(value=False)
+        self.muni_filter_check = ttk.Checkbutton(muni_frame, text="この市区町村の範囲のみ変換する", variable=self.muni_filter_enabled_var, state="disabled", command=self.on_muni_filter_toggled)
+        self.muni_filter_check.grid(row=1, column=1, padx=(220, 5), pady=5, sticky=tk.W)
+
+        # Download help link
+        download_label = ttk.Label(muni_frame, text="CSVダウンロード: 総務省統計局ホームページ (https://www.stat.go.jp/data/mesh/index.html)", font=("Helvetica", 8), cursor="hand2", foreground="blue")
+        download_label.grid(row=2, column=0, columnspan=3, sticky=tk.W, pady=(2, 0))
+        download_label.bind("<Button-1>", lambda e: self.open_download_url())
+
+        muni_frame.columnconfigure(1, weight=1)
+
+        # Trace muni CSV path changes
+        self.muni_csv_var.trace_add("write", self.on_muni_csv_changed)
+
         # Settings frame
         settings_frame = ttk.LabelFrame(main_frame, text="変換設定", padding="10")
         settings_frame.pack(fill=tk.X, pady=(0, 15))
@@ -231,16 +821,27 @@ class ConverterApp(tk.Tk):
             "EPSG:4326 (WGS84)"
         ]
         
-        # JGD2011 Plane Rectangular Coordinate System (Zones 1-19)
+        # JGD2011 Plane Rect Coordinate System (Zones 1-19)
         for i in range(1, 20):
             self.base_crs_values.append(f"EPSG:{6668 + i} (JGD2011 / 平面直交座標第{i}系)")
             
-        # JGD2000 Plane Rectangular Coordinate System (Zones 1-19)
+        # JGD2000 Plane Rect Coordinate System (Zones 1-19)
         for i in range(1, 20):
             self.base_crs_values.append(f"EPSG:{2442 + i} (JGD2000 / 平面直交座標第{i}系)")
 
         self.crs_combo = ttk.Combobox(settings_frame, textvariable=self.crs_var, values=self.base_crs_values, state="readonly", width=45)
         self.crs_combo.grid(row=0, column=1, padx=5, pady=5, sticky=tk.W)
+        self.crs_combo.bind("<<ComboboxSelected>>", self.on_crs_changed)
+
+        # Merge Checkbox
+        self.merge_var = tk.BooleanVar(value=False)
+        self.merge_check = ttk.Checkbutton(settings_frame, text="1枚のGeoTIFFに結合する (Merge into 1 TIFF)", variable=self.merge_var, command=self.on_merge_toggled)
+        self.merge_check.grid(row=1, column=0, columnspan=2, sticky=tk.W, pady=5)
+
+        # File Size Estimate Label
+        self.size_estimate_var = tk.StringVar(value="")
+        self.size_estimate_label = ttk.Label(settings_frame, textvariable=self.size_estimate_var, font=("Helvetica", 9, "italic"))
+        self.size_estimate_label.grid(row=2, column=0, columnspan=2, sticky=tk.W, pady=2)
 
         # Progress Bar and Controls
         control_frame = ttk.Frame(main_frame)
@@ -271,7 +872,11 @@ class ConverterApp(tk.Tk):
     def on_input_dir_changed(self, *args):
         input_dir = self.input_dir_var.get().strip()
         if not input_dir or not os.path.isdir(input_dir):
+            self.scanned_metadata_cache = []
+            self.size_estimate_var.set("")
             return
+
+        self.start_metadata_scan(input_dir)
 
         res = scan_input_directory_for_crs(input_dir)
         if res:
@@ -291,6 +896,173 @@ class ConverterApp(tk.Tk):
             self.crs_var.set(crs_name)
             self.log(f"フォルダスキャン結果: 推奨座標系「{crs_name}」 (代表点: 北緯{lat:.3f}, 東経{lon:.3f})")
 
+    def start_metadata_scan(self, input_dir):
+        if self.metadata_scan_thread_active:
+            return
+        self.scanned_metadata_cache = []
+        self.size_estimate_var.set("結合後予測サイズ: ファイル情報取得中...")
+        self.metadata_scan_thread_active = True
+        threading.Thread(target=self.scan_metadata_thread, args=(input_dir,), daemon=True).start()
+
+    def scan_metadata_thread(self, input_dir):
+        all_files = []
+        for root_dir, _, filenames in os.walk(input_dir):
+            for f in filenames:
+                ext = os.path.splitext(f)[1].lower()
+                if ext in ['.xml', '.zip']:
+                    all_files.append(os.path.join(root_dir, f))
+
+        temp_cache = []
+        total = len(all_files)
+        for idx, file_path in enumerate(all_files):
+            basename = os.path.basename(file_path)
+            if idx % 5 == 0 or idx == total - 1:
+                try:
+                    self.after(0, lambda count=idx+1, tot=total: self.size_estimate_var.set(f"結合後予測サイズ: ファイル情報取得中 ({count}/{tot})..."))
+                except Exception:
+                    pass
+
+            ext = os.path.splitext(file_path)[1].lower()
+            if ext == '.xml':
+                try:
+                    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                        content = f.read()
+                    meta = parse_xml_metadata(content)
+                    meta['filename'] = basename
+                    meta['mesh_code'] = extract_mesh_code(basename)
+                    temp_cache.append(meta)
+                except Exception:
+                    pass
+            elif ext == '.zip':
+                try:
+                    with zipfile.ZipFile(file_path, 'r') as zf:
+                        xml_members = [name for name in zf.namelist() if name.lower().endswith('.xml')]
+                        for m_name in xml_members:
+                            content = zf.read(m_name).decode('utf-8', errors='ignore')
+                            meta = parse_xml_metadata(content)
+                            meta['filename'] = os.path.basename(m_name)
+                            meta['mesh_code'] = extract_mesh_code(os.path.basename(m_name))
+                            temp_cache.append(meta)
+                except Exception:
+                    pass
+
+        self.scanned_metadata_cache = temp_cache
+        self.metadata_scan_thread_active = False
+        try:
+            self.after(0, self.on_metadata_scan_complete)
+        except Exception:
+            # Fallback if tk event loop is not running (e.g. headless unit tests)
+            self.on_metadata_scan_complete()
+
+    def on_metadata_scan_complete(self):
+        self.update_size_estimate()
+
+    def on_crs_changed(self, event=None):
+        self.update_size_estimate()
+
+    def on_merge_toggled(self):
+        self.update_size_estimate()
+
+    def update_size_estimate(self):
+        if not self.scanned_metadata_cache:
+            self.size_estimate_var.set("変換対象のXML/ZIPファイルが見つかりません。")
+            self.size_estimate_label.config(foreground="black")
+            return
+
+        total_files = len(self.scanned_metadata_cache)
+        
+        # Check if municipality filter is active
+        is_filtered = False
+        muni_name = self.muni_select_var.get().strip()
+        filtered_metadata = self.scanned_metadata_cache
+        
+        if self.muni_filter_enabled_var.get() and muni_name in self.muni_map:
+            allowed_meshes = self.muni_map[muni_name]
+            filtered_metadata = [
+                m for m in self.scanned_metadata_cache
+                if m['mesh_code'].replace("-", "") in allowed_meshes
+            ]
+            is_filtered = True
+
+        filtered_count = len(filtered_metadata)
+        if filtered_count == 0:
+            self.size_estimate_var.set(f"対象範囲外: 選択した市区町村 ({muni_name}) の範囲内にDEMファイルが見つかりません。")
+            self.size_estimate_label.config(foreground="red")
+            return
+
+        if not self.merge_var.get():
+            if is_filtered:
+                self.size_estimate_var.set(f"個別出力: 選択した市区町村 ({muni_name}) のメッシュのみ出力します (出力数: {filtered_count} / 総ファイル数: {total_files} 件)。")
+            else:
+                self.size_estimate_var.set(f"各ファイルを個別にGeoTIFF出力します (ファイル数: {total_files}件)。")
+            self.size_estimate_label.config(foreground="black")
+            return
+
+        crs_selection = self.crs_var.get()
+        match = re.search(r'EPSG:(\d+)', crs_selection)
+        target_epsg = int(match.group(1)) if match else 6697
+
+        try:
+            xs = []
+            ys = []
+            
+            for m in filtered_metadata:
+                src_epsg = 4612 if m['is_jgd2000'] else 6697
+                left, bottom, right, top = transform_bounds(
+                    f"EPSG:{src_epsg}", f"EPSG:{target_epsg}",
+                    m['lon_min'], m['lat_min'], m['lon_max'], m['lat_max']
+                )
+                xs.extend([left, right])
+                ys.extend([bottom, top])
+                
+            global_left = min(xs)
+            global_right = max(xs)
+            global_bottom = min(ys)
+            global_top = max(ys)
+            
+            m0 = filtered_metadata[0]
+            src_epsg0 = 4612 if m0['is_jgd2000'] else 6697
+            l0, b0, r0, t0 = transform_bounds(
+                f"EPSG:{src_epsg0}", f"EPSG:{target_epsg}",
+                m0['lon_min'], m0['lat_min'], m0['lon_max'], m0['lat_max']
+            )
+            dx_target = (r0 - l0) / m0['width']
+            dy_target = (t0 - b0) / m0['height']
+            
+            merged_width = max(1, int(round((global_right - global_left) / dx_target)))
+            merged_height = max(1, int(round((global_top - global_bottom) / dy_target)))
+            
+            predicted_bytes = merged_width * merged_height * 4
+            size_mb = predicted_bytes / (1024 * 1024)
+            
+            if size_mb >= 1024:
+                size_str = f"{size_mb / 1024:.2f} GB"
+            else:
+                size_str = f"{size_mb:.1f} MB"
+                
+            comp_min = size_mb * 0.1
+            comp_max = size_mb * 0.25
+            
+            if comp_min >= 1024:
+                comp_str = f"{comp_min/1024:.2f}〜{comp_max/1024:.2f} GB"
+            else:
+                comp_str = f"{comp_min:.1f}〜{comp_max:.1f} MB"
+                
+            info_text = f"結合後予測サイズ: 未圧縮 {size_str} / LZW圧縮後 約 {comp_str} ({merged_width} × {merged_height} px)"
+            if is_filtered:
+                info_text += f"\n({muni_name}の範囲: {filtered_count}/{total_files} メッシュを結合)"
+            
+            if size_mb > 4096:
+                self.size_estimate_label.config(foreground="red")
+                self.size_estimate_var.set(info_text + "\n⚠️ 警告: 結合サイズが極端に大きいため、処理に時間がかかる、またはメモリが不足する可能性があります。")
+            else:
+                self.size_estimate_label.config(foreground="green")
+                self.size_estimate_var.set(info_text)
+                
+        except Exception as e:
+            self.size_estimate_var.set(f"結合後の予測サイズ: 計算エラー ({str(e)})")
+            self.size_estimate_label.config(foreground="red")
+
     def browse_input(self):
         dir_selected = filedialog.askdirectory(title="入力フォルダの選択")
         if dir_selected:
@@ -300,6 +1072,90 @@ class ConverterApp(tk.Tk):
         dir_selected = filedialog.askdirectory(title="出力フォルダの選択")
         if dir_selected:
             self.output_dir_var.set(os.path.normpath(dir_selected))
+
+    def browse_muni_csv(self):
+        file_selected = filedialog.askopenfilename(
+            title="市区町村別メッシュCSVの選択",
+            filetypes=[("CSV Files", "*.csv"), ("All Files", "*.*")]
+        )
+        if file_selected:
+            self.muni_csv_var.set(os.path.normpath(file_selected))
+
+    def open_download_url(self):
+        import webbrowser
+        webbrowser.open("https://www.stat.go.jp/data/mesh/index.html")
+
+    def on_muni_csv_changed(self, *args):
+        csv_path = self.muni_csv_var.get().strip()
+        if not csv_path or not os.path.isfile(csv_path):
+            self.muni_map = {}
+            self.muni_combo.config(values=[], state="disabled")
+            self.muni_filter_check.config(state="disabled")
+            self.muni_filter_enabled_var.set(False)
+            self.update_size_estimate()
+            return
+            
+        try:
+            self.load_municipality_csv(csv_path)
+            if self.muni_map:
+                muni_names = sorted(list(self.muni_map.keys()))
+                self.muni_combo.config(values=muni_names, state="readonly")
+                self.muni_filter_check.config(state="normal")
+                self.muni_combo.current(0)
+                self.muni_filter_enabled_var.set(True)
+                self.log(f"CSV読込成功: {len(self.muni_map)} 市区町村のデータを読み込みました。")
+            else:
+                self.log("CSV読込警告: 有効な市区町村データが見つかりませんでした。", "WARNING")
+        except Exception as e:
+            self.log(f"CSV読込エラー: {str(e)}", "ERROR")
+            messagebox.showerror("エラー", f"CSVファイルの読み込みに失敗しました:\n{str(e)}")
+            
+        self.update_size_estimate()
+
+    def load_municipality_csv(self, csv_path):
+        import csv
+        encodings = ['cp932', 'shift_jis', 'utf-8', 'utf-8-sig']
+        content = None
+        for enc in encodings:
+            try:
+                with open(csv_path, 'r', encoding=enc) as f:
+                    content = f.read()
+                break
+            except Exception:
+                continue
+                
+        if content is None:
+            raise ValueError("CSVファイルの文字コードを自動判定できませんでした。Shift_JISまたはUTF-8であることをご確認ください。")
+            
+        lines = content.splitlines()
+        reader = csv.reader(lines)
+        
+        self.muni_map = {}
+        for row in reader:
+            if not row or len(row) < 3:
+                continue
+                
+            code_candidate = row[0].strip().replace('"', '').replace("'", "")
+            name_candidate = row[1].strip().replace('"', '').replace("'", "")
+            mesh_candidate = row[2].strip().replace('"', '').replace("'", "").replace("-", "")
+            
+            # Skip headers
+            if "市区町村" in name_candidate or "メッシュ" in mesh_candidate:
+                continue
+                
+            # Must be 8 digit code
+            if not mesh_candidate.isdigit() or len(mesh_candidate) != 8:
+                continue
+                
+            if name_candidate not in self.muni_map:
+                self.muni_map[name_candidate] = set()
+            self.muni_map[name_candidate].add(mesh_candidate)
+
+    def on_muni_selected(self, event=None):
+        self.update_size_estimate()
+
+    def on_muni_filter_toggled(self):
+        self.update_size_estimate()
 
     def log(self, message, level="INFO"):
         self.log_text.config(state=tk.NORMAL)
@@ -332,6 +1188,12 @@ class ConverterApp(tk.Tk):
             messagebox.showerror("エラー", "有効な出力フォルダを選択してください。")
             return
 
+        if self.muni_filter_enabled_var.get():
+            muni_name = self.muni_select_var.get().strip()
+            if not muni_name or muni_name not in self.muni_map:
+                messagebox.showerror("エラー", "有効な市区町村を選択してください。")
+                return
+
         try:
             os.makedirs(output_dir, exist_ok=True)
         except Exception as e:
@@ -343,6 +1205,9 @@ class ConverterApp(tk.Tk):
         self.input_btn.config(state=tk.DISABLED)
         self.output_btn.config(state=tk.DISABLED)
         self.crs_combo.config(state=tk.DISABLED)
+        self.muni_csv_btn.config(state=tk.DISABLED)
+        self.muni_combo.config(state=tk.DISABLED)
+        self.muni_filter_check.config(state=tk.DISABLED)
 
         self.log_text.config(state=tk.NORMAL)
         self.log_text.delete("1.0", tk.END)
@@ -412,70 +1277,302 @@ class ConverterApp(tk.Tk):
         error_count = 0
         skipped_count = 0
 
-        # Process each file sequentially to save memory
-        for idx, file_path in enumerate(all_files):
-            basename = os.path.basename(file_path)
-            log_msg(f"[{idx+1}/{total_files}] ファイルを処理中: {basename}")
+        # Features list for GeoJSON
+        success_features = []
+        temp_tiff_paths = []
 
-            progress_percent = (idx / total_files) * 100
-            self.progress_var.set(progress_percent)
+        # Determine merge mode
+        should_merge = self.merge_var.get()
+        
+        # Determine final merged filename
+        input_folder_name = os.path.basename(os.path.abspath(input_dir))
+        if not input_folder_name:
+            input_folder_name = "dem"
+        merged_filename = f"{input_folder_name}_merged.tif"
 
-            ext = os.path.splitext(file_path)[1].lower()
-            if ext == '.xml':
-                try:
-                    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                        xml_content = f.read()
+        # Create temporary directory if merging
+        temp_dir = None
+        work_dir = output_dir
+        if should_merge:
+            temp_dir = tempfile.TemporaryDirectory()
+            work_dir = temp_dir.name
+            log_msg(f"結合モード: 一時作業ディレクトリを作成しました: {work_dir}")
 
-                    out_name = os.path.splitext(basename)[0] + ".tif"
-                    out_path = os.path.join(output_dir, out_name)
+        # Determine filter mode
+        should_filter = self.muni_filter_enabled_var.get()
+        muni_name = self.muni_select_var.get().strip()
+        allowed_meshes = self.muni_map.get(muni_name, set()) if should_filter else set()
+        
+        if should_filter:
+            log_msg(f"市区町村フィルター有効: {muni_name} のメッシュのみ変換します。")
 
-                    self.convert_xml_content(xml_content, out_path, default_epsg)
-                    log_msg(f"変換完了: {out_name}", "SUCCESS")
-                    success_count += 1
-                except Exception as e:
-                    err_msg = f"ファイル {basename} の変換中にエラーが発生しました:\n{traceback.format_exc()}"
-                    log_msg(err_msg, "ERROR")
-                    error_count += 1
+        try:
+            # Process each file sequentially
+            for idx, file_path in enumerate(all_files):
+                basename = os.path.basename(file_path)
+                log_msg(f"[{idx+1}/{total_files}] ファイルを処理中: {basename}")
 
-            elif ext == '.zip':
-                try:
-                    with zipfile.ZipFile(file_path, 'r') as zf:
-                        xml_members = [name for name in zf.namelist() if name.lower().endswith('.xml')]
+                progress_percent = (idx / total_files) * 90  # Save 10% for merge/export
+                self.progress_var.set(progress_percent)
 
-                        if not xml_members:
-                            log_msg(f"ZIP内にXMLファイルが含まれていません: {basename}", "WARNING")
+                ext = os.path.splitext(file_path)[1].lower()
+                if ext == '.xml':
+                    try:
+                        mesh_code = extract_mesh_code(basename)
+                        if should_filter and mesh_code.replace("-", "") not in allowed_meshes:
+                            logger.info(f"Skipped {basename} - not in municipality {muni_name}")
                             skipped_count += 1
                             continue
 
-                        for member_name in xml_members:
-                            member_basename = os.path.basename(member_name)
-                            log_msg(f"  ZIP内ファイルを処理中: {member_basename}")
+                        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                            xml_content = f.read()
 
-                            xml_content = zf.read(member_name).decode('utf-8', errors='ignore')
+                        out_name = os.path.splitext(basename)[0] + ".tif"
+                        out_path = os.path.join(work_dir, out_name)
 
-                            out_name = os.path.splitext(member_basename)[0] + ".tif"
-                            out_path = os.path.join(output_dir, out_name)
+                        # If merging, we convert to geographic JGD2011 (EPSG:6697) first to avoid seam gaps,
+                        # and reproject the merged raster at the end.
+                        conv_epsg = 6697 if should_merge else default_epsg
+                        bounds = self.convert_xml_content(xml_content, out_path, conv_epsg)
+                        log_msg(f"変換完了: {out_name}", "SUCCESS")
+                        success_count += 1
+                        
+                        success_features.append({
+                            'filename': out_name if not should_merge else merged_filename,
+                            'mesh_code': mesh_code,
+                            'lon_min': bounds[0], 'lat_min': bounds[1],
+                            'lon_max': bounds[2], 'lat_max': bounds[3]
+                        })
+                        if should_merge:
+                            temp_tiff_paths.append(out_path)
+                    except Exception as e:
+                        err_msg = f"ファイル {basename} の変換中にエラーが発生しました:\n{traceback.format_exc()}"
+                        log_msg(err_msg, "ERROR")
+                        error_count += 1
 
-                            self.convert_xml_content(xml_content, out_path, default_epsg)
-                            log_msg(f"  変換完了: {out_name}", "SUCCESS")
-                            success_count += 1
+                elif ext == '.zip':
+                    try:
+                        with zipfile.ZipFile(file_path, 'r') as zf:
+                            xml_members = [name for name in zf.namelist() if name.lower().endswith('.xml')]
+
+                            if not xml_members:
+                                log_msg(f"ZIP内にXMLファイルが含まれていません: {basename}", "WARNING")
+                                skipped_count += 1
+                                continue
+
+                            for member_name in xml_members:
+                                member_basename = os.path.basename(member_name)
+                                mesh_code = extract_mesh_code(member_basename)
+                                
+                                if should_filter and mesh_code.replace("-", "") not in allowed_meshes:
+                                    logger.info(f"Skipped ZIP member {member_basename} in {basename} - not in municipality {muni_name}")
+                                    skipped_count += 1
+                                    continue
+
+                                log_msg(f"  ZIP内ファイルを処理中: {member_basename}")
+
+                                xml_content = zf.read(member_name).decode('utf-8', errors='ignore')
+
+                                out_name = os.path.splitext(member_basename)[0] + ".tif"
+                                out_path = os.path.join(work_dir, out_name)
+
+                                # If merging, we convert to geographic JGD2011 (EPSG:6697) first to avoid seam gaps,
+                                # and reproject the merged raster at the end.
+                                conv_epsg = 6697 if should_merge else default_epsg
+                                bounds = self.convert_xml_content(xml_content, out_path, conv_epsg)
+                                log_msg(f"  変換完了: {out_name}", "SUCCESS")
+                                success_count += 1
+                                
+                                success_features.append({
+                                    'filename': out_name if not should_merge else merged_filename,
+                                    'mesh_code': mesh_code,
+                                    'lon_min': bounds[0], 'lat_min': bounds[1],
+                                    'lon_max': bounds[2], 'lat_max': bounds[3]
+                                })
+                                if should_merge:
+                                    temp_tiff_paths.append(out_path)
+                    except Exception as e:
+                        err_msg = f"ZIPファイル {basename} の処理中にエラーが発生しました:\n{traceback.format_exc()}"
+                        log_msg(err_msg, "ERROR")
+                        error_count += 1
+
+            # Perform raster merging if enabled
+            if should_merge and success_count > 0:
+                self.progress_var.set(90)
+                log_msg("--- 一時ファイルの結合処理を開始します ---")
+                try:
+                    merged_filepath = os.path.join(output_dir, merged_filename)
+                    src_datasets = [rasterio.open(fp) for fp in temp_tiff_paths]
+                    
+                    log_msg("ラスターデータを結合中 (rasterio.merge.merge)...")
+                    merged_data, merged_transform = rio_merge(src_datasets, nodata=-9999.0)
+                    
+                    # Close source datasets
+                    for ds in src_datasets:
+                        ds.close()
+
+                    # Reproject the merged dataset to the target CRS to ensure seamless boundaries
+                    if default_epsg == 6697:
+                        dst_data = merged_data
+                        dst_transform = merged_transform
+                        dst_width = merged_data.shape[2]
+                        dst_height = merged_data.shape[1]
+                    else:
+                        log_msg(f"結合データを対象座標系 (EPSG:{default_epsg}) へ再投影中...")
+                        dst_crs = f"EPSG:{default_epsg}"
+                        src_crs = "EPSG:6697"
+                        
+                        # Get geographic bounds of merged data
+                        left = merged_transform.c
+                        top = merged_transform.f
+                        right = left + merged_transform.a * merged_data.shape[2]
+                        bottom = top + merged_transform.e * merged_data.shape[1]
+                        
+                        dst_transform, dst_width, dst_height = calculate_default_transform(
+                            src_crs, dst_crs, 
+                            merged_data.shape[2], merged_data.shape[1],
+                            left=left, bottom=bottom, right=right, top=top
+                        )
+                        
+                        dst_data = np.full((1, dst_height, dst_width), -9999.0, dtype=np.float32)
+                        
+                        reproject(
+                            source=merged_data[0],
+                            destination=dst_data[0],
+                            src_transform=merged_transform,
+                            src_crs=src_crs,
+                            dst_transform=dst_transform,
+                            dst_crs=dst_crs,
+                            resampling=Resampling.bilinear,
+                            src_nodata=-9999.0,
+                            dst_nodata=-9999.0
+                        )
+                    
+                    # Update metadata for output
+                    meta = {
+                        "driver": "GTiff",
+                        "dtype": "float32",
+                        "nodata": -9999.0,
+                        "width": dst_width,
+                        "height": dst_height,
+                        "count": 1,
+                        "crs": f"EPSG:{default_epsg}",
+                        "transform": dst_transform,
+                        "compress": "lzw"
+                    }
+                    
+                    # Write merged GeoTIFF
+                    log_msg(f"結合ファイルを書き込み中: {merged_filename}")
+                    with rasterio.open(merged_filepath, "w", **meta) as dst:
+                        dst.write(dst_data[0], 1)
+                        
+                    log_msg(f"結合完了: {merged_filename}", "SUCCESS")
                 except Exception as e:
-                    err_msg = f"ZIPファイル {basename} の処理中にエラーが発生しました:\n{traceback.format_exc()}"
+                    err_msg = f"ファイルの結合処理中にエラーが発生しました:\n{traceback.format_exc()}"
                     log_msg(err_msg, "ERROR")
                     error_count += 1
 
-        self.progress_var.set(100)
-        log_msg("--- 変換処理が終了しました ---")
-        summary_msg = f"結果: 成功 {success_count} 件, エラー {error_count} 件, スキップ {skipped_count} 件"
-        log_msg(summary_msg)
+            # Output GeoJSON, JS, and HTML viewer
+            if success_count > 0:
+                self.progress_var.set(95)
+                log_msg("--- 図郭・メタデータ (GeoJSON, HTML) の出力処理を開始します ---")
+                
+                # Build GeoJSON features
+                geojson_features = []
+                
+                # If merged, add merged polygon at the top
+                if should_merge and success_count > 0:
+                    global_lon_min = min(sf['lon_min'] for sf in success_features)
+                    global_lat_min = min(sf['lat_min'] for sf in success_features)
+                    global_lon_max = max(sf['lon_max'] for sf in success_features)
+                    global_lat_max = max(sf['lat_max'] for sf in success_features)
+                    
+                    merged_feat = {
+                        "type": "Feature",
+                        "geometry": {
+                            "type": "Polygon",
+                            "coordinates": [[
+                                [global_lon_min, global_lat_min],
+                                [global_lon_max, global_lat_min],
+                                [global_lon_max, global_lat_max],
+                                [global_lon_min, global_lat_max],
+                                [global_lon_min, global_lat_min]
+                            ]]
+                        },
+                        "properties": {
+                            "filename": merged_filename,
+                            "mesh_code": "Merged (結合ファイル)",
+                            "type": "merged_file"
+                        }
+                    }
+                    geojson_features.append(merged_feat)
+                    
+                # Add individual source mesh features
+                for sf in success_features:
+                    feat = {
+                        "type": "Feature",
+                        "geometry": {
+                            "type": "Polygon",
+                            "coordinates": [[
+                                [sf['lon_min'], sf['lat_min']],
+                                [sf['lon_max'], sf['lat_min']],
+                                [sf['lon_max'], sf['lat_max']],
+                                [sf['lon_min'], sf['lat_max']],
+                                [sf['lon_min'], sf['lat_min']]
+                            ]]
+                        },
+                        "properties": {
+                            "filename": sf['filename'],
+                            "mesh_code": sf['mesh_code'],
+                            "type": "source_mesh"
+                        }
+                    }
+                    geojson_features.append(feat)
+                    
+                geojson_data = {
+                    "type": "FeatureCollection",
+                    "features": geojson_features
+                }
+                
+                # Write dem_layout.geojson
+                geojson_path = os.path.join(output_dir, "dem_layout.geojson")
+                with open(geojson_path, "w", encoding="utf-8") as f:
+                    json.dump(geojson_data, f, ensure_ascii=False, indent=2)
+                log_msg(f"GeoJSONを出力しました: dem_layout.geojson")
+                
+                # Write dem_layout.js
+                js_path = os.path.join(output_dir, "dem_layout.js")
+                with open(js_path, "w", encoding="utf-8") as f:
+                    f.write(f"const demLayoutData = {json.dumps(geojson_data, ensure_ascii=False, indent=2)};\n")
+                log_msg(f"JavaScript用データを出力しました: dem_layout.js")
+                
+                # Write map.html
+                html_path = os.path.join(output_dir, "map.html")
+                with open(html_path, "w", encoding="utf-8") as f:
+                    f.write(MAP_HTML_TEMPLATE)
+                log_msg(f"Leaflet地図ビューアを出力しました: map.html")
 
-        if error_count > 0:
-            messagebox.showwarning("処理完了（一部エラーあり）", 
-                                   f"変換処理が完了しましたが、{error_count} 件のエラーが発生しました。\n詳細はログファイルを確認してください。\n\n{summary_msg}")
-        else:
-            messagebox.showinfo("処理完了", f"すべてのファイルの変換処理が成功しました！\n\n{summary_msg}")
-
-        self.finish_conversion()
+        finally:
+            if temp_dir:
+                temp_dir.cleanup()
+                log_msg("一時作業ディレクトリを削除しました。")
+            
+            # Reset UI and notify user
+            try:
+                self.after(0, lambda: self.progress_var.set(100))
+                self.after(0, self.finish_conversion)
+                if success_count > 0:
+                    self.after(0, lambda: self.show_completion_dialog(
+                        output_dir, success_count, error_count, skipped_count, merged_filename, should_merge
+                    ))
+                else:
+                    self.after(0, lambda: messagebox.showerror(
+                        "エラー", "変換に成功したファイルがありませんでした。処理ログをご確認ください。"
+                    ))
+            except Exception:
+                # Fallback for headless testing
+                self.progress_var.set(100)
+                self.finish_conversion()
 
     def convert_xml_content(self, xml_content, output_filepath, default_epsg):
         root = ET.fromstring(xml_content)
@@ -613,7 +1710,6 @@ class ConverterApp(tk.Tk):
             out_data = data
         else:
             # Reprojection needed
-            from rasterio.warp import calculate_default_transform, reproject, Resampling
             
             # Calculate output transform and dimensions
             out_transform, out_width, out_height = calculate_default_transform(
@@ -636,7 +1732,7 @@ class ConverterApp(tk.Tk):
             )
             out_crs = dst_crs
 
-        # Write data to GeoTIFF using rasterio
+        # Write data to GeoTIFF using rasterio with LZW compression
         with rasterio.open(
             output_filepath,
             'w',
@@ -647,9 +1743,12 @@ class ConverterApp(tk.Tk):
             dtype='float32',
             crs=out_crs,
             transform=out_transform,
-            nodata=-9999.0
+            nodata=-9999.0,
+            compress='lzw'
         ) as dst:
             dst.write(out_data, 1)
+
+        return lon_min, lat_min, lon_max, lat_max
 
     def finish_conversion(self):
         self.processing = False
@@ -657,6 +1756,80 @@ class ConverterApp(tk.Tk):
         self.input_btn.config(state=tk.NORMAL)
         self.output_btn.config(state=tk.NORMAL)
         self.crs_combo.config(state=tk.READONLY)
+        self.muni_csv_btn.config(state=tk.NORMAL)
+        if self.muni_map:
+            self.muni_combo.config(state="readonly")
+            self.muni_filter_check.config(state="normal")
+
+    def show_completion_dialog(self, output_dir, success_count, error_count, skipped_count, merged_filename, should_merge):
+        dialog = tk.Toplevel(self)
+        dialog.title("処理完了 (Processing Completed)")
+        dialog.geometry("520x280")
+        dialog.resizable(False, False)
+        dialog.transient(self)
+        dialog.grab_set()
+        
+        dialog.update_idletasks()
+        width = dialog.winfo_width()
+        height = dialog.winfo_height()
+        x = self.winfo_x() + (self.winfo_width() // 2) - (width // 2)
+        y = self.winfo_y() + (self.winfo_height() // 2) - (height // 2)
+        dialog.geometry(f"+{x}+{y}")
+
+        main_frame = ttk.Frame(dialog, padding="20")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        # Title
+        title_label = ttk.Label(main_frame, text="🎉 変換処理が完了しました！", font=("Helvetica", 12, "bold"), foreground="green")
+        title_label.pack(anchor=tk.W, pady=(0, 10))
+
+        # Stats
+        stats_text = f"成功: {success_count}件"
+        if error_count > 0:
+            stats_text += f" / エラー: {error_count}件"
+        if skipped_count > 0:
+            stats_text += f" / スキップ: {skipped_count}件"
+            
+        ttk.Label(main_frame, text=stats_text, font=("Helvetica", 10)).pack(anchor=tk.W, pady=(0, 15))
+
+        # Path input
+        ttk.Label(main_frame, text="出力先フォルダ (Output Directory):", font=("Helvetica", 9, "bold")).pack(anchor=tk.W)
+        
+        path_frame = ttk.Frame(main_frame)
+        path_frame.pack(fill=tk.X, pady=(2, 15))
+        
+        path_entry = ttk.Entry(path_frame, font=("Consolas", 9))
+        path_entry.insert(0, os.path.abspath(output_dir))
+        path_entry.config(state="readonly")
+        path_entry.pack(fill=tk.X, side=tk.LEFT, expand=True)
+
+        # Actions
+        def open_folder():
+            import subprocess
+            abs_dir = os.path.abspath(output_dir)
+            if sys.platform == 'win32':
+                os.startfile(abs_dir)
+            elif sys.platform == 'darwin':
+                subprocess.Popen(['open', abs_dir])
+            else:
+                subprocess.Popen(['xdg-open', abs_dir])
+
+        def open_map():
+            import webbrowser
+            html_path = os.path.abspath(os.path.join(output_dir, "map.html"))
+            if os.path.exists(html_path):
+                webbrowser.open(f"file:///{html_path.replace(os.sep, '/')}")
+
+        btn_frame = ttk.Frame(main_frame)
+        btn_frame.pack(fill=tk.X, pady=(10, 0))
+
+        ttk.Button(btn_frame, text="フォルダを開く", command=open_folder).pack(side=tk.LEFT, padx=(0, 10))
+        
+        html_path = os.path.join(output_dir, "map.html")
+        if os.path.exists(html_path):
+            ttk.Button(btn_frame, text="地図をブラウザで開く (map.html)", command=open_map).pack(side=tk.LEFT, padx=(0, 10))
+
+        ttk.Button(btn_frame, text="閉じる", command=dialog.destroy).pack(side=tk.RIGHT)
 
 if __name__ == "__main__":
     app = ConverterApp()
