@@ -3583,37 +3583,39 @@ def parse_vector_gml(xml_content):
         if tag.startswith('{'):
             tag = tag.split('}', 1)[1]
             
-        if tag == 'BldA':
+        if tag in ('BldA', 'RdEdg', 'RdCL'):
             fid = ""
             coords = []
+            attrs = {}
+            
+            # Extract GML attributes
             for child in elem:
                 c_tag = child.tag.split('}', 1)[1] if child.tag.startswith('{') else child.tag
-                if c_tag == 'fid':
-                    fid = child.text if child.text else ""
-            
-            for sub_elem in elem.iter():
-                sub_tag = sub_elem.tag.split('}', 1)[1] if sub_elem.tag.startswith('{') else sub_elem.tag
-                if sub_tag == 'posList':
-                    if sub_elem.text:
-                        coords = parse_pos_list(sub_elem.text)
-                        break
-                        
-            if coords:
-                features.append({
-                    'type': 'BldA',
-                    'fid': fid,
-                    'geometry_type': 'Polygon',
-                    'coords': coords
-                })
                 
-        elif tag in ('RdEdg', 'RdCL'):
-            fid = ""
-            coords = []
-            for child in elem:
-                c_tag = child.tag.split('}', 1)[1] if child.tag.startswith('{') else child.tag
-                if c_tag == 'fid':
-                    fid = child.text if child.text else ""
-            
+                # Skip geometry
+                if c_tag in ('loc', 'area', 'position'):
+                    continue
+                    
+                sub_elements = list(child)
+                if not sub_elements:
+                    if child.text:
+                        attrs[c_tag] = child.text.strip()
+                    # Keep fid separate as well
+                    if c_tag == 'fid':
+                        fid = child.text.strip() if child.text else ""
+                else:
+                    # Check for timePosition
+                    for sub in sub_elements:
+                        sub_tag = sub.tag.split('}', 1)[1] if sub.tag.startswith('{') else sub.tag
+                        if sub_tag == 'timePosition' and sub.text:
+                            attrs[c_tag] = sub.text.strip()
+                            break
+                    else:
+                        texts = [t.strip() for t in child.itertext() if t.strip()]
+                        if texts:
+                            attrs[c_tag] = " ".join(texts)
+                            
+            # Extract coordinates
             for sub_elem in elem.iter():
                 sub_tag = sub_elem.tag.split('}', 1)[1] if sub_elem.tag.startswith('{') else sub_elem.tag
                 if sub_tag == 'posList':
@@ -3622,11 +3624,13 @@ def parse_vector_gml(xml_content):
                         break
                         
             if coords:
+                geom_type = 'Polygon' if tag == 'BldA' else 'LineString'
                 features.append({
                     'type': tag,
                     'fid': fid,
-                    'geometry_type': 'LineString',
-                    'coords': coords
+                    'geometry_type': geom_type,
+                    'coords': coords,
+                    'attributes': attrs
                 })
                 
     return features
@@ -3656,6 +3660,28 @@ def write_shapefile(output_path, geometry_type, features, zone):
     w.field('FID', 'C', size=80)
     w.field('TYPE', 'C', size=50)
     
+    # Collect all attribute keys across all features
+    all_attr_keys = set()
+    for f in features:
+        if 'attributes' in f:
+            all_attr_keys.update(f['attributes'].keys())
+            
+    sorted_keys = sorted(list(all_attr_keys))
+    
+    field_mappings = {}
+    for key in sorted_keys:
+        field_name = key[:10].upper()
+        # Ensure uniqueness
+        counter = 1
+        orig_field_name = field_name
+        while field_name in [f[0] for f in w.fields if f]:
+            suffix = str(counter)
+            field_name = f"{orig_field_name[:10-len(suffix)]}{suffix}"
+            counter += 1
+            
+        w.field(field_name, 'C', size=100)
+        field_mappings[key] = field_name
+        
     for f in features:
         coords = f['coords']
         if not coords:
@@ -3681,7 +3707,14 @@ def write_shapefile(output_path, geometry_type, features, zone):
         else:
             w.line([plane_coords])
             
-        w.record(f['fid'], f['type'])
+        # Write record
+        rec = [f['fid'], f['type']]
+        attrs = f.get('attributes', {})
+        for key in sorted_keys:
+            val = attrs.get(key, "")
+            rec.append(str(val))
+            
+        w.record(*rec)
         
     w.close()
     
@@ -3915,18 +3948,19 @@ class VectorConverterApp(tk.Tk):
         self.blda_check = ttk.Checkbutton(settings_frame, text="建物 (BldA) 変換", variable=self.convert_blda_var, command=self.update_size_estimate_and_crs)
         self.blda_check.grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
 
-        self.convert_rdcl_var = tk.BooleanVar(value=True)
-        self.rdcl_check = ttk.Checkbutton(settings_frame, text="道路中心線 (RdCL) 変換", variable=self.convert_rdcl_var, command=self.update_size_estimate_and_crs)
-        self.rdcl_check.grid(row=0, column=1, sticky=tk.W, padx=5, pady=5)
+        # Default road edge is True, road centerline is False (swapped from previous design)
+        self.convert_rdedg_var = tk.BooleanVar(value=True)
+        self.rdedg_check = ttk.Checkbutton(settings_frame, text="道路縁 (RdEdg) 変換", variable=self.convert_rdedg_var, command=self.update_size_estimate_and_crs)
+        self.rdedg_check.grid(row=0, column=1, sticky=tk.W, padx=5, pady=5)
 
         # Show Advanced Settings checkbox
         self.show_advanced_var = tk.BooleanVar(value=False)
         self.show_advanced_check = ttk.Checkbutton(settings_frame, text="詳細設定を表示", variable=self.show_advanced_var, command=self.toggle_advanced_settings)
         self.show_advanced_check.grid(row=0, column=2, sticky=tk.W, padx=5, pady=5)
 
-        # Road Edge Checkbox (hidden by default)
-        self.convert_rdedg_var = tk.BooleanVar(value=False)
-        self.rdedg_check = ttk.Checkbutton(settings_frame, text="道路縁 (RdEdg) 変換", variable=self.convert_rdedg_var, command=self.update_size_estimate_and_crs)
+        # Road Centerline Checkbox (hidden by default now)
+        self.convert_rdcl_var = tk.BooleanVar(value=False)
+        self.rdcl_check = ttk.Checkbutton(settings_frame, text="道路中心線 (RdCL) 変換", variable=self.convert_rdcl_var, command=self.update_size_estimate_and_crs)
 
         # CRS dropdown
         ttk.Label(settings_frame, text="出力座標系 (系1〜19):").grid(row=2, column=0, sticky=tk.W, pady=10, padx=5)
@@ -3975,10 +4009,10 @@ class VectorConverterApp(tk.Tk):
 
     def toggle_advanced_settings(self):
         if self.show_advanced_var.get():
-            self.rdedg_check.grid(row=1, column=0, sticky=tk.W, padx=5, pady=5)
+            self.rdcl_check.grid(row=1, column=0, sticky=tk.W, padx=5, pady=5)
         else:
-            self.rdedg_check.grid_forget()
-            self.convert_rdedg_var.set(False)
+            self.rdcl_check.grid_forget()
+            self.convert_rdcl_var.set(False)
             self.update_size_estimate_and_crs()
 
     def browse_input(self):
@@ -4166,15 +4200,15 @@ class VectorConverterApp(tk.Tk):
             
             def apply_auto_detect():
                 self.convert_blda_var.set(has_blda)
-                self.convert_rdcl_var.set(has_rdcl)
+                self.convert_rdedg_var.set(has_rdedg)
                 if self.show_advanced_var.get():
-                    self.convert_rdedg_var.set(has_rdedg)
+                    self.convert_rdcl_var.set(has_rdcl)
                 else:
-                    self.convert_rdedg_var.set(False)
+                    self.convert_rdcl_var.set(False)
                 
-                detect_str = f"自動検出: 建物={has_blda}, 道路中心線={has_rdcl}"
-                if has_rdedg:
-                    detect_str += f" (道路縁検出あり)"
+                detect_str = f"自動検出: 建物={has_blda}, 道路縁={has_rdedg}"
+                if has_rdcl:
+                    detect_str += f" (道路中心線検出あり)"
                 self.log(detect_str)
                 self.update_size_estimate_and_crs()
 
