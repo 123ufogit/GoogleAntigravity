@@ -1,0 +1,566 @@
+/* style.css */
+
+/* 変数定義 */
+:root {
+    --bg-main: #0f172a; /* Slate 900 */
+    --bg-panel: rgba(15, 23, 42, 0.75);
+    --border-color: rgba(255, 255, 255, 0.08);
+    --text-primary: #f8fafc; /* Slate 50 */
+    --text-secondary: #94a3b8; /* Slate 400 */
+    --text-muted: #64748b; /* Slate 500 */
+    
+    /* テーマカラー */
+    --color-primary: #0ea5e9; /* Sky 500 */
+    --color-temp: #f97316; /* Orange 500 */
+    --color-temp-rgb: 249, 115, 22;
+    --color-rain: #3b82f6; /* Blue 500 */
+    --color-rain-rgb: 59, 130, 246;
+    --color-snow: #38bdf8; /* Sky 300 */
+    --color-snow-rgb: 56, 189, 248;
+    --color-sun: #eab308; /* Yellow 500 */
+    --color-sun-rgb: 234, 179, 8;
+    
+    /* フォント */
+    --font-sans: 'Outfit', 'Noto Sans JP', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+/* 全体設定 */
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: var(--font-sans);
+    background-color: var(--bg-main);
+    color: var(--text-primary);
+    overflow: hidden;
+    height: 100vh;
+}
+
+#app-container {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    display: flex;
+}
+
+/* 地図 */
+#map {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 1;
+}
+
+/* マップ上のヘッダー */
+#map-header {
+    position: absolute;
+    top: 20px;
+    left: 20px;
+    z-index: 10;
+    pointer-events: auto;
+    background: rgba(15, 23, 42, 0.85);
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--border-color);
+    padding: 12px 24px;
+    border-radius: 16px;
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3), 0 8px 10px -6px rgba(0, 0, 0, 0.3);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+#map-header .logo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+#map-header .logo i {
+    color: var(--color-primary);
+    font-size: 1.5rem;
+    animation: rotateEarth 20s linear infinite;
+}
+
+#map-header h1 {
+    font-size: 1.3rem;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+    background: linear-gradient(135deg, #38bdf8 0%, #0369a1 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+#map-header .subtitle {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+}
+
+@keyframes rotateEarth {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+/* サイドバー (ガラスモルフィズム) */
+#sidebar {
+    position: absolute;
+    top: 0;
+    right: 0;
+    height: 100%;
+    width: 440px;
+    z-index: 10;
+    background: var(--bg-panel);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border-left: 1px solid var(--border-color);
+    box-shadow: -10px 0 30px rgba(0, 0, 0, 0.4);
+    transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+    display: flex;
+    flex-direction: column;
+    pointer-events: auto;
+}
+
+#sidebar.collapsed {
+    transform: translateX(100%);
+}
+
+#sidebar-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 30px;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+}
+
+/* スクロールバー装飾 */
+#sidebar-content::-webkit-scrollbar {
+    width: 6px;
+}
+#sidebar-content::-webkit-scrollbar-track {
+    background: transparent;
+}
+#sidebar-content::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 3px;
+}
+#sidebar-content::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.2);
+}
+
+/* トグルボタン */
+.sidebar-toggle-btn {
+    position: absolute;
+    top: 50%;
+    left: -40px;
+    transform: translateY(-50%);
+    width: 40px;
+    height: 60px;
+    background: var(--bg-panel);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid var(--border-color);
+    border-right: none;
+    border-radius: 12px 0 0 12px;
+    color: var(--text-primary);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: -5px 0 15px rgba(0, 0, 0, 0.2);
+    transition: background 0.3s, color 0.3s;
+    outline: none;
+}
+
+.sidebar-toggle-btn:hover {
+    background: rgba(15, 23, 42, 0.95);
+    color: var(--color-primary);
+}
+
+#sidebar.collapsed .sidebar-toggle-btn i {
+    transform: rotate(180deg);
+}
+
+.sidebar-toggle-btn i {
+    transition: transform 0.3s;
+}
+
+/* 初期状態のメッセージ */
+.instruction-view {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    text-align: center;
+    gap: 20px;
+    padding: 20px;
+}
+
+.icon-pulse {
+    width: 80px;
+    height: 80px;
+    border-radius: 50%;
+    background: rgba(14, 165, 233, 0.1);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 2.5rem;
+    color: var(--color-primary);
+    margin-bottom: 10px;
+    animation: pulseGlow 2s infinite;
+}
+
+@keyframes pulseGlow {
+    0% {
+        box-shadow: 0 0 0 0 rgba(14, 165, 233, 0.4);
+    }
+    70% {
+        box-shadow: 0 0 0 20px rgba(14, 165, 233, 0);
+    }
+    100% {
+        box-shadow: 0 0 0 0 rgba(14, 165, 233, 0);
+    }
+}
+
+.instruction-view h2 {
+    font-size: 1.4rem;
+    font-weight: 700;
+}
+
+.instruction-view p {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    line-height: 1.6;
+}
+
+/* セクションカード */
+.section-card {
+    background: rgba(30, 41, 59, 0.3);
+    border: 1px solid var(--border-color);
+    border-radius: 16px;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.section-card h3 {
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 10px;
+}
+
+.section-card h3 i {
+    color: var(--color-primary);
+}
+
+/* 位置情報・標高サマリー */
+.location-summary {
+    background: linear-gradient(135deg, rgba(14, 165, 233, 0.1) 0%, rgba(30, 41, 59, 0.2) 100%);
+    gap: 12px;
+}
+
+.badge {
+    background: rgba(14, 165, 233, 0.2);
+    border: 1px solid rgba(14, 165, 233, 0.3);
+    color: #38bdf8;
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    font-family: 'Outfit', sans-serif;
+    display: inline-block;
+}
+
+.coordinates {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    font-family: 'Outfit', sans-serif;
+}
+
+.coordinates strong {
+    color: var(--text-primary);
+}
+
+.elevation-card {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    background: rgba(15, 23, 42, 0.4);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 12px 16px;
+}
+
+.elevation-icon {
+    font-size: 1.8rem;
+    color: #34d399; /* Emerald 400 */
+}
+
+.elevation-info {
+    display: flex;
+    flex-direction: column;
+}
+
+.elevation-info .label {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+}
+
+.elevation-info .value-container {
+    display: flex;
+    align-items: baseline;
+    gap: 2px;
+}
+
+.elevation-info .value {
+    font-size: 1.6rem;
+    font-weight: 800;
+    font-family: 'Outfit', sans-serif;
+    color: var(--text-primary);
+}
+
+.elevation-info .unit {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+}
+
+.elevation-info .subtext {
+    font-size: 0.65rem;
+    color: var(--text-muted);
+}
+
+/* メトリクスグリッド */
+.metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+}
+
+.metric-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: rgba(15, 23, 42, 0.2);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 12px;
+    transition: transform 0.2s, border-color 0.2s;
+}
+
+.metric-item:hover {
+    transform: translateY(-2px);
+    border-color: rgba(255, 255, 255, 0.15);
+}
+
+.metric-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.1rem;
+}
+
+.metric-icon.temp {
+    background: rgba(249, 115, 22, 0.1);
+    color: var(--color-temp);
+}
+.metric-icon.rain {
+    background: rgba(59, 130, 246, 0.1);
+    color: var(--color-rain);
+}
+.metric-icon.snow {
+    background: rgba(56, 189, 248, 0.1);
+    color: var(--color-snow);
+}
+.metric-icon.sun {
+    background: rgba(234, 179, 8, 0.1);
+    color: var(--color-sun);
+}
+
+.metric-data {
+    display: flex;
+    flex-direction: column;
+}
+
+.metric-data .label {
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+}
+
+.metric-data .val-wrapper {
+    display: flex;
+    align-items: baseline;
+    gap: 1px;
+}
+
+.metric-data .val {
+    font-size: 1.1rem;
+    font-weight: 700;
+    font-family: 'Outfit', sans-serif;
+}
+
+.metric-data .unit {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+}
+
+/* チャートコンテナ */
+.chart-container {
+    background: rgba(15, 23, 42, 0.3);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 16px;
+    margin-top: 8px;
+}
+
+.chart-title {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    margin-bottom: 12px;
+    font-weight: 600;
+}
+
+/* フッター */
+.data-footer {
+    margin-top: 10px;
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    line-height: 1.5;
+}
+
+.data-footer i {
+    color: var(--text-secondary);
+}
+
+.hidden {
+    display: none !important;
+}
+
+/* Leaflet コントロールカスタマイズ */
+.leaflet-bar {
+    border: 1px solid var(--border-color) !important;
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3) !important;
+}
+
+.leaflet-bar a {
+    background-color: rgba(15, 23, 42, 0.9) !important;
+    color: var(--text-primary) !important;
+    border-bottom: 1px solid var(--border-color) !important;
+    transition: background 0.2s, color 0.2s;
+}
+
+.leaflet-bar a:hover {
+    background-color: #1e293b !important;
+    color: var(--color-primary) !important;
+}
+
+.leaflet-control-layers {
+    background: rgba(15, 23, 42, 0.9) !important;
+    backdrop-filter: blur(8px);
+    border: 1px solid var(--border-color) !important;
+    color: var(--text-primary) !important;
+    border-radius: 12px !important;
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3) !important;
+    font-family: var(--font-sans) !important;
+    font-size: 0.8rem !important;
+    padding: 6px 10px !important;
+}
+
+.leaflet-control-layers-toggle {
+    background-size: 20px 20px !important;
+}
+
+/* ヘッダーガイドボタン & データ案内カード */
+.header-right {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.header-guide-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+    color: #ffffff;
+    font-size: 0.8rem;
+    font-weight: 600;
+    padding: 6px 14px;
+    border-radius: 20px;
+    text-decoration: none;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+    transition: all 0.2s ease;
+}
+
+.header-guide-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 16px rgba(37, 99, 235, 0.5);
+    background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+}
+
+.data-notice-card {
+    margin-top: 24px;
+    background: rgba(30, 41, 59, 0.6);
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    border-radius: 14px;
+    padding: 16px;
+    text-align: left;
+}
+
+.data-notice-card .notice-title {
+    color: #fbbf24;
+    font-size: 0.85rem;
+    font-weight: 700;
+    margin-bottom: 6px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.data-notice-card p {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    margin-bottom: 12px;
+    line-height: 1.4;
+}
+
+.notice-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+    background: rgba(56, 189, 248, 0.15);
+    border: 1px solid rgba(56, 189, 248, 0.4);
+    color: #38bdf8;
+    font-size: 0.8rem;
+    font-weight: 600;
+    padding: 8px 12px;
+    border-radius: 10px;
+    text-decoration: none;
+    transition: all 0.2s ease;
+}
+
+.notice-btn:hover {
+    background: rgba(56, 189, 248, 0.25);
+    border-color: #38bdf8;
+}
+

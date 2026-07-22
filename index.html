@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>気候平年値メッシュ WebGIS | 国土数値情報・国土地理院</title>
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500;700&family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+    
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Leaflet Map CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" 
+          integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+          
+    <link rel="stylesheet" href="style.css">
+</head>
+<body class="dark-theme">
+    <div id="app-container">
+        <!-- 地図領域 -->
+        <main id="map"></main>
+        
+        <!-- ヘッダーオーバーレイ -->
+        <header id="map-header">
+            <div class="logo">
+                <i class="fa-solid fa-earth-asia"></i>
+                <h1>Climate WebGIS</h1>
+            </div>
+            <div class="header-right">
+                <div class="subtitle">日本平年値メッシュビューア</div>
+                <a href="download_guide.html" target="_blank" class="header-guide-btn">
+                    <i class="fa-solid fa-cloud-arrow-down"></i> データダウンロードガイド
+                </a>
+            </div>
+        </header>
+
+        <!-- サイドバー (ガラスモルフィズム) -->
+        <aside id="sidebar" class="glass-panel collapsed">
+            <!-- クローズ/トグルボタン -->
+            <button id="sidebar-toggle" class="sidebar-toggle-btn" aria-label="サイドバー切り替え">
+                <i class="fa-solid fa-chevron-right"></i>
+            </button>
+            
+            <div id="sidebar-content">
+                <!-- 初期表示メッセージ -->
+                <div id="sidebar-instructions" class="instruction-view">
+                    <div class="icon-pulse">
+                        <i class="fa-solid fa-location-dot"></i>
+                    </div>
+                    <h2>日本地図をクリックしてください</h2>
+                    <p>クリックした地点の標高、年平均気温、年合計降水量、最大積雪深などの平年値データを瞬時に集計し、サマリーと推移グラフを表示します。</p>
+                    
+                    <!-- データ案内カード -->
+                    <div class="data-notice-card">
+                        <div class="notice-title"><i class="fa-solid fa-circle-info"></i> メッシュデータ未準備の場合</div>
+                        <p>データが見つからない場合は、国土数値情報の平年値メッシュデータをセットアップしてください。</p>
+                        <a href="download_guide.html" target="_blank" class="notice-btn">
+                            <i class="fa-solid fa-download"></i> ダウンロードサイト＆手順を開く
+                        </a>
+                    </div>
+                </div>
+
+                <!-- データ表示ビュー -->
+                <div id="sidebar-data" class="data-view hidden">
+                    <!-- 位置・標高サマリー -->
+                    <section class="section-card location-summary">
+                        <div class="location-header">
+                            <span class="badge"><i class="fa-solid fa-hashtag"></i> 3次メッシュ: <span id="val-mesh-code">-</span></span>
+                        </div>
+                        <div class="coordinates">
+                            <span>経度: <strong id="val-lon">-</strong></span>
+                            <span>緯度: <strong id="val-lat">-</strong></span>
+                        </div>
+                        
+                        <!-- 標高表示（国土地理院API） -->
+                        <div class="elevation-card">
+                            <div class="elevation-icon">
+                                <i class="fa-solid fa-mountain"></i>
+                            </div>
+                            <div class="elevation-info">
+                                <span class="label">標高 (国土地理院)</span>
+                                <div class="value-container">
+                                    <span class="value" id="val-elevation">-</span>
+                                    <span class="unit">m</span>
+                                </div>
+                                <span class="subtext" id="val-elevation-src">ソース: 標高API</span>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- 主要気候指標グリッド -->
+                    <section class="section-card">
+                        <h3><i class="fa-solid fa-chart-pie"></i> 年間気候サマリー</h3>
+                        <div class="metrics-grid">
+                            <!-- 気温 -->
+                            <div class="metric-item">
+                                <div class="metric-icon temp"><i class="fa-solid fa-temperature-half"></i></div>
+                                <div class="metric-data">
+                                    <span class="label">年平均気温</span>
+                                    <div class="val-wrapper"><span class="val" id="val-temp-avg">-</span><span class="unit">℃</span></div>
+                                </div>
+                            </div>
+                            <!-- 降水量 -->
+                            <div class="metric-item">
+                                <div class="metric-icon rain"><i class="fa-solid fa-cloud-showers-heavy"></i></div>
+                                <div class="metric-data">
+                                    <span class="label">年合計降水量</span>
+                                    <div class="val-wrapper"><span class="val" id="val-precip-ann">-</span><span class="unit">mm</span></div>
+                                </div>
+                            </div>
+                            <!-- 積雪 -->
+                            <div class="metric-item">
+                                <div class="metric-icon snow"><i class="fa-solid fa-snowflake"></i></div>
+                                <div class="metric-data">
+                                    <span class="label">年最大最深積雪</span>
+                                    <div class="val-wrapper"><span class="val" id="val-snow-max">-</span><span class="unit">cm</span></div>
+                                </div>
+                            </div>
+                            <!-- 日照時間 -->
+                            <div class="metric-item">
+                                <div class="metric-icon sun"><i class="fa-solid fa-sun"></i></div>
+                                <div class="metric-data">
+                                    <span class="label">年合計日照時間</span>
+                                    <div class="val-wrapper"><span class="val" id="val-sun-ann">-</span><span class="unit">時間</span></div>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- 気候推移グラフ -->
+                    <section class="section-card">
+                        <h3><i class="fa-solid fa-chart-line"></i> 月別推移グラフ</h3>
+                        
+                        <div class="chart-container">
+                            <h4 class="chart-title">雨温図 (平均気温 & 降水量)</h4>
+                            <canvas id="chart-climograph"></canvas>
+                        </div>
+                        
+                        <div class="chart-container">
+                            <h4 class="chart-title">月別最深積雪</h4>
+                            <canvas id="chart-snow"></canvas>
+                        </div>
+
+                        <div class="chart-container">
+                            <h4 class="chart-title">月別日照時間</h4>
+                            <canvas id="chart-sunshine"></canvas>
+                        </div>
+                    </section>
+                    
+                    <!-- ライセンス・メタデータ -->
+                    <footer class="data-footer">
+                        <p><i class="fa-solid fa-circle-info"></i> 気候データは国土数値情報「平年値メッシュデータ（第3.0版）」から引用しています（統計期間：1991年〜2020年）。</p>
+                    </footer>
+                </div>
+            </div>
+        </aside>
+    </div>
+
+    <!-- Leaflet Map JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" 
+            integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+            
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <!-- アプリ本体JS -->
+    <script src="app.js"></script>
+</body>
+</html>

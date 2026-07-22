@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GIS Browser — Leaflet WebGIS ブラウザ</title>
+  <meta name="description" content="KML・GeoJSON・画像・GeoTIFFをドラッグ＆ドロップで地図に表示。位置情報付与・360°全天球画像対応・PDF出力。Leafletベースのスタンドアロン型WebGISブラウザ。">
+
+  <!-- Open Graph -->
+  <meta property="og:title" content="GIS Browser — Leaflet WebGIS">
+  <meta property="og:description" content="KML・GeoJSON・画像・GeoTIFFをドラッグ＆ドロップで地図表示。位置情報付与・PDF出力対応。">
+  <meta property="og:type" content="website">
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;600;800&display=swap" rel="stylesheet">
+
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+
+  <!-- App CSS -->
+  <link rel="stylesheet" href="gis_browser.css">
+</head>
+<body>
+
+  <!-- ==================== 地図エリア ==================== -->
+  <div id="map" role="main" aria-label="地図表示エリア"></div>
+
+  <!-- ==================== ベースマップ切り替えツールバー ==================== -->
+  <div id="basemap-toolbar" class="basemap-toolbar" role="toolbar" aria-label="ベースマップ選択">
+    <button class="basemap-btn active" data-basemap="standard" title="国土地理院 標準地図">
+      🗾 標準
+    </button>
+    <button class="basemap-btn" data-basemap="ortho" title="国土地理院 空中写真">
+      📡 空中写真
+    </button>
+    <button class="basemap-btn" data-basemap="osm" title="OpenStreetMap">
+      🌍 OSM
+    </button>
+  </div>
+
+  <!-- ==================== フローティングパネル ==================== -->
+  <div id="floating-panel" class="floating-panel" role="complementary" aria-label="GISコントロールパネル">
+
+    <!-- パネルヘッダー（ドラッグハンドル） -->
+    <div id="panel-header" class="panel-header">
+      <div id="panel-drag-handle" class="panel-drag-handle" title="ドラッグして移動">
+        <span class="panel-logo">🗺️</span>
+        <span class="panel-title">GIS Browser</span>
+      </div>
+      <div class="panel-header-actions">
+        <button id="panel-toggle" class="panel-icon-btn" title="折りたたむ" aria-label="パネルを折りたたむ">⌃</button>
+      </div>
+    </div>
+
+    <!-- パネル本体 -->
+    <div id="panel-body" class="panel-body">
+
+      <!-- ドロップゾーン -->
+      <div id="drop-zone" class="drop-zone" role="button" tabindex="0"
+           aria-label="ファイルをドロップ、またはクリックして選択">
+        <div class="drop-zone-icon">📂</div>
+        <div class="drop-zone-text">
+          <strong>ここにファイルをドロップ</strong>
+          <span>KML · GeoJSON · 画像 · GeoTIFF</span>
+        </div>
+        <input type="file" id="file-input" multiple
+               accept=".kml,.kmz,.geojson,.json,.tif,.tiff,.jpg,.jpeg,.png,.heic,.heif,.webp"
+               class="file-input-hidden" aria-hidden="true">
+      </div>
+
+      <!-- レイヤーリスト -->
+      <div id="layer-list-container" class="layer-list-container">
+        <div class="layer-list-header">
+          <span class="layer-list-title">📚 レイヤー</span>
+          <button id="clear-all-btn" class="clear-all-btn" title="すべてのレイヤーを削除" aria-label="全レイヤー削除">
+            🗑 全削除
+          </button>
+        </div>
+        <ul id="layer-list" class="layer-list" role="list" aria-label="読み込み済みレイヤー">
+          <li class="layer-list-empty">レイヤーがありません</li>
+        </ul>
+      </div>
+
+      <!-- エクスポートセクション -->
+      <div class="export-section">
+        <div class="export-section-title">💾 エクスポート</div>
+        <div class="export-buttons">
+          <button id="export-geojson" class="export-btn" title="ピンをGeoJSON形式で保存">
+            GeoJSON
+          </button>
+          <button id="export-kml" class="export-btn" title="ピンをKML形式で保存">
+            KML
+          </button>
+          <button id="export-pdf" class="export-btn export-btn-primary" title="地図をPDFまたはPNG画像で出力">
+            📄 PDF / PNG
+          </button>
+        </div>
+      </div>
+
+    </div><!-- /.panel-body -->
+  </div><!-- /#floating-panel -->
+
+  <!-- ==================== 撮影位置特定モード オーバーレイ ==================== -->
+  <div id="location-mode-overlay" class="location-mode-overlay hidden" role="alert" aria-live="polite">
+    <div class="location-mode-banner">
+      <span class="location-mode-icon" aria-hidden="true">📍</span>
+      <span id="location-mode-message">地図上をクリックして撮影位置を指定してください</span>
+      <button id="location-mode-cancel" class="location-mode-cancel" aria-label="撮影位置特定をキャンセル">
+        キャンセル
+      </button>
+    </div>
+  </div>
+
+  <!-- ==================== 写真プレビューパネル ==================== -->
+  <div id="photo-preview-panel" class="photo-preview-panel hidden" role="dialog"
+       aria-label="写真プレビュー" aria-modal="true">
+    <div class="preview-header">
+      <span id="preview-filename" class="preview-filename" title="">photo.jpg</span>
+      <span id="preview-counter" class="preview-counter">1 / 1</span>
+    </div>
+
+    <div id="photo-viewer" class="photo-viewer">
+      <img id="preview-img" class="preview-img" alt="プレビュー" loading="lazy">
+      <div id="pannellum-container" class="pannellum-container hidden"
+           aria-label="360°全天球ビューア"></div>
+    </div>
+
+    <div class="preview-badge-row">
+      <span id="badge-360" class="badge-360 hidden">🌐 360°全天球</span>
+    </div>
+
+    <!-- 自動回転ボタン行（360°画像のときのみ表示） -->
+    <div id="rotate-btn-row" class="rotate-btn-row hidden">
+      <button id="btn-rotate-toggle" class="btn-rotate-toggle" data-rotating="1">
+        ⏸ 回転一時停止
+      </button>
+    </div>
+
+    <div class="preview-actions">
+      <button id="btn-locate" class="btn-locate" aria-label="撮影位置を地図上で指定する">
+        📍 撮影位置を特定する
+      </button>
+      <button id="btn-confirm-location" class="btn-confirm-location hidden"
+              aria-label="この位置に確定する">
+        ✓ この位置に確定
+      </button>
+      <button id="btn-next" class="btn-next hidden" aria-label="次の画像へ進む">
+        次へ →
+      </button>
+      <button id="btn-skip" class="btn-skip" aria-label="この画像をスキップする">
+        スキップ
+      </button>
+    </div>
+
+    <div id="location-preview-map-hint" class="location-preview-map-hint hidden">
+      💡 ピンをドラッグして位置を微調整できます
+    </div>
+  </div>
+
+  <!-- ==================== 画像モーダル（フルサイズプレビュー） ==================== -->
+  <div id="image-modal" class="image-modal hidden" role="dialog"
+       aria-label="画像フルプレビュー" aria-modal="true">
+    <div class="image-modal-inner">
+      <button id="modal-close" class="modal-close" aria-label="閉じる">✕</button>
+      <button id="modal-rotate-btn" class="modal-rotate-btn hidden" data-rotating="1">
+        ⏸ 回転一時停止
+      </button>
+      <div id="image-modal-content" class="image-modal-content"></div>
+    </div>
+  </div>
+
+  <!-- ==================== PDF出力形式選択モーダル ==================== -->
+  <div id="export-format-modal" class="export-format-modal hidden" role="dialog"
+       aria-label="出力形式を選択" aria-modal="true">
+    <div class="export-format-inner">
+      <h2 class="export-format-title">📄 出力形式を選択</h2>
+      <p class="export-format-desc">地図をどの形式で保存しますか？</p>
+      <div class="export-format-buttons">
+        <button id="export-format-pdf" class="export-format-btn export-format-btn-primary">
+          <span class="export-format-icon">📄</span>
+          <strong>PDF (A4横)</strong>
+          <small>印刷・共有に最適</small>
+        </button>
+        <button id="export-format-png" class="export-format-btn">
+          <span class="export-format-icon">🖼️</span>
+          <strong>PNG 画像</strong>
+          <small>高解像度・透過対応</small>
+        </button>
+      </div>
+      <button id="export-format-cancel" class="export-format-cancel">キャンセル</button>
+    </div>
+  </div>
+
+  <!-- ==================== プログレスオーバーレイ（GeoTIFF処理中） ==================== -->
+  <div id="progress-overlay" class="progress-overlay hidden" role="progressbar"
+       aria-label="処理進捗" aria-live="polite">
+    <div class="progress-content">
+      <div class="progress-icon">🛰️</div>
+      <div id="progress-title" class="progress-title">処理中...</div>
+      <div id="progress-message" class="progress-message"></div>
+      <div class="progress-bar-container">
+        <div id="progress-bar-fill" class="progress-bar-fill"></div>
+      </div>
+      <div id="progress-percent" class="progress-percent">0%</div>
+    </div>
+  </div>
+
+  <!-- ==================== トースト通知 ==================== -->
+  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+
+  <!-- ==================== スクリプト読み込み ==================== -->
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+          integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
+  <!-- モジュール（依存順に読み込む） -->
+  <script src="modules/ui.js"></script>
+  <script src="modules/appState.js"></script>
+  <script src="modules/fileHandler.js"></script>
+  <script src="modules/floatingPanel.js"></script>
+  <script src="modules/kmlParser.js"></script>
+  <script src="modules/geojsonHandler.js"></script>
+  <script src="modules/imageHandler.js"></script>
+  <script src="modules/pinEditor.js"></script>
+  <script src="modules/geotiffHandler.js"></script>
+  <script src="modules/exportHandler.js"></script>
+
+  <!-- メインアプリ -->
+  <script src="gis_browser.js"></script>
+
+</body>
+</html>
