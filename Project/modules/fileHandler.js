@@ -11,6 +11,7 @@
     kmz:     'kml',
     geojson: 'geojson',
     json:    'geojson',
+    gpx:     'gpx',
     tif:     'geotiff',
     tiff:    'geotiff',
     jpg:     'image',
@@ -39,6 +40,7 @@
           switch (type) {
             case 'kml':     await GIS.KmlParser.load(file); break;
             case 'geojson': await GIS.GeoJsonHandler.load(file); break;
+            case 'gpx':     await GIS.GpxHandler.load(file); break;
             case 'image':   await GIS.ImageHandler.load(file); break;
             case 'geotiff': await GIS.GeoTiffHandler.load(file); break;
           }
@@ -53,7 +55,7 @@
      * ファイルのタイプを判定する
      * MIMEタイプと拡張子の両方で判定（堅牢性確保）
      * @param {File} file
-     * @returns {string|null} 'kml' | 'geojson' | 'image' | 'geotiff' | null
+     * @returns {string|null} 'kml' | 'geojson' | 'gpx' | 'image' | 'geotiff' | null
      */
     _detectType(file) {
       // 拡張子で判定
@@ -64,6 +66,7 @@
       const mime = file.type.toLowerCase();
       if (mime.includes('kml')) return 'kml';
       if (mime === 'application/geo+json' || mime === 'application/json') return 'geojson';
+      if (mime === 'application/gpx+xml' || mime.includes('gpx')) return 'gpx';
       if (mime.startsWith('image/tiff')) return 'geotiff';
       if (mime.startsWith('image/')) return 'image';
 

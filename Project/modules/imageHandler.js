@@ -42,13 +42,16 @@
       // GPS情報の取得
       const latlng = this._extractLatLng(exif);
 
+      // 撮影日時の取得
+      const timestamp = this._extractTimestamp(exif);
+
       if (latlng) {
         // 位置情報あり → 地図にピンを追加
         this._addPinToMap(file.name, dataUrl, latlng, is360);
         GIS.UI.showToast(`📍 位置情報を読み取り、ピンを追加しました: ${file.name}`, 'success');
       } else {
         // 位置情報なし → 撮影位置特定キューへ
-        GIS.AppState.enqueuePendingImage({ file, dataUrl, filename: file.name, is360 });
+        GIS.AppState.enqueuePendingImage({ file, dataUrl, filename: file.name, is360, timestamp });
         GIS.UI.showToast(`📷 位置情報なし: ${file.name} — 撮影位置を特定してください`, 'warn');
 
         // キューが開始されていなければ開始する
@@ -135,6 +138,25 @@
         return L.latLng(lat, lon);
       }
 
+      return null;
+    },
+
+    /**
+     * EXIFから撮影日時のタイムスタンプ（ミリ秒）を取得する
+     * @param {object|null} exif
+     * @returns {number|null}
+     */
+    _extractTimestamp(exif) {
+      if (!exif) return null;
+      const dateVal = exif.DateTimeOriginal || exif.CreateDate || exif.ModifyDate || exif.DateTime;
+      if (!dateVal) return null;
+      if (dateVal instanceof Date && !isNaN(dateVal.getTime())) {
+        return dateVal.getTime();
+      }
+      if (typeof dateVal === 'string') {
+        const d = new Date(dateVal);
+        if (!isNaN(d.getTime())) return d.getTime();
+      }
       return null;
     },
 

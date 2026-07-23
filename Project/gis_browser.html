@@ -72,10 +72,10 @@
         <div class="drop-zone-icon">📂</div>
         <div class="drop-zone-text">
           <strong>ここにファイルをドロップ</strong>
-          <span>KML · GeoJSON · 画像 · GeoTIFF</span>
+          <span>KML · GeoJSON · GPX · 画像 · GeoTIFF</span>
         </div>
         <input type="file" id="file-input" multiple
-               accept=".kml,.kmz,.geojson,.json,.tif,.tiff,.jpg,.jpeg,.png,.heic,.heif,.webp"
+               accept=".kml,.kmz,.geojson,.json,.gpx,.tif,.tiff,.jpg,.jpeg,.png,.heic,.heif,.webp"
                class="file-input-hidden" aria-hidden="true">
       </div>
 
@@ -217,6 +217,7 @@
           <table class="help-table">
             <tr><td>KML / KMZ</td><td>地物・ライン・ポリゴン</td></tr>
             <tr><td>GeoJSON</td><td>ポイント・ライン・ポリゴン</td></tr>
+            <tr><td>GPX</td><td>ウェイポイント・トラック・ルート</td></tr>
             <tr><td>JPEG / PNG / HEIC</td><td>GPS位置情報付き写真</td></tr>
             <tr><td>GeoTIFF</td><td>衛星・航空画像ラスター（最大500MB+圧縮）</td></tr>
           </table>
@@ -292,6 +293,7 @@
   <script src="modules/floatingPanel.js"></script>
   <script src="modules/kmlParser.js"></script>
   <script src="modules/geojsonHandler.js"></script>
+  <script src="modules/gpxHandler.js"></script>
   <script src="modules/imageHandler.js"></script>
   <script src="modules/pinEditor.js"></script>
   <script src="modules/geotiffHandler.js"></script>

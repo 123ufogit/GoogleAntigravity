@@ -227,22 +227,25 @@
     _enterLocationMode() {
       GIS.AppState.locationMode = true;
       const map = GIS.AppState.map;
-
-      // UI更新
-      document.getElementById('location-mode-overlay').classList.remove('hidden');
       const item = GIS.AppState.pendingImages[this._currentIndex];
-      document.getElementById('location-mode-message').textContent =
-        `「${item.filename}」の撮影位置を地図上でクリックして指定`;
-      map.getContainer().classList.add('location-mode');
 
-      // ワンタイムクリックリスナー
-      const onMapClick = (e) => {
-        if (!GIS.AppState.locationMode) return;
-        map.off('click', onMapClick);
+      // 既存クリックイベント解除
+      map.off('click');
 
-        // 仮マーカーを設置（ドラッグ可能）
+      // GPXからの自動提案チェック（GPXレイヤーがあり、画像にtimestampがある場合）
+      const proposal = this._findClosestGpxPoint(item.timestamp);
+
+      if (proposal) {
+        const { point, diffMs } = proposal;
+        const diffSec = Math.round(diffMs / 1000);
+        const diffMin = Math.floor(diffSec / 60);
+        const secRem = diffSec % 60;
+        const diffStr = diffMin > 0 ? `${diffMin}分${secRem}秒` : `${diffSec}秒`;
+
+        // 仮マーカーを提案位置に置く
+        const latlng = L.latLng(point.lat, point.lon);
         if (GIS.AppState.tempMarker) map.removeLayer(GIS.AppState.tempMarker);
-        GIS.AppState.tempMarker = L.marker(e.latlng, {
+        GIS.AppState.tempMarker = L.marker(latlng, {
           draggable: true,
           icon: L.divIcon({
             className: 'temp-marker',
@@ -252,16 +255,104 @@
           })
         }).addTo(map);
 
-        // UI更新：確定ボタンを表示
+        map.setView(latlng, Math.max(map.getZoom(), 15));
+
+        document.getElementById('location-mode-message').textContent =
+          `「${item.filename}」の撮影位置をGPXから提案中（時刻差: ${diffStr}）。再クリックで変更可`;
+
         document.getElementById('btn-locate').classList.add('hidden');
         document.getElementById('btn-confirm-location').classList.remove('hidden');
         document.getElementById('location-preview-map-hint').classList.remove('hidden');
-        document.getElementById('location-mode-overlay').classList.add('hidden');
-        map.getContainer().classList.remove('location-mode');
-        GIS.AppState.locationMode = false;
+      } else {
+        document.getElementById('location-mode-message').textContent =
+          `「${item.filename}」の撮影位置を地図上でクリックして指定`;
+      }
+
+      document.getElementById('location-mode-overlay').classList.remove('hidden');
+      map.getContainer().classList.add('location-mode');
+
+      // クリックリスナー（手動指定または提案の変更）
+      const onMapClick = (e) => {
+        if (!GIS.AppState.locationMode) return;
+
+        // 既存ピンへのスナップ判定
+        const snappedLatLng = this._findSnappedLatLng(e.latlng);
+
+        // 仮マーカーを設置
+        if (GIS.AppState.tempMarker) map.removeLayer(GIS.AppState.tempMarker);
+        GIS.AppState.tempMarker = L.marker(snappedLatLng, {
+          draggable: true,
+          icon: L.divIcon({
+            className: 'temp-marker',
+            html: '<div class="temp-marker-inner">📍</div>',
+            iconSize: [36, 36],
+            iconAnchor: [18, 36]
+          })
+        }).addTo(map);
+
+        // UI更新
+        document.getElementById('btn-locate').classList.add('hidden');
+        document.getElementById('btn-confirm-location').classList.remove('hidden');
+        document.getElementById('location-preview-map-hint').classList.remove('hidden');
       };
 
-      map.once('click', onMapClick);
+      map.on('click', onMapClick);
+    },
+
+    /**
+     * 画像の撮影日時に最も近いGPXポイントを探索する（24時間以内）
+     * @param {number|null} timestamp
+     * @returns {{ point: object, diffMs: number }|null}
+     */
+    _findClosestGpxPoint(timestamp) {
+      if (!timestamp) return null;
+      let bestPt = null;
+      let minDiff = Infinity;
+      const MAX_DIFF_MS = 24 * 60 * 60 * 1000; // 24時間
+
+      GIS.AppState.layers.forEach(entry => {
+        if (entry.type === 'gpx' && entry.visible && entry.layer && entry.layer._gpxPoints) {
+          entry.layer._gpxPoints.forEach(pt => {
+            const diff = Math.abs(pt.timeMs - timestamp);
+            if (diff < minDiff) {
+              minDiff = diff;
+              bestPt = pt;
+            }
+          });
+        }
+      });
+
+      if (bestPt && minDiff <= MAX_DIFF_MS) {
+        return { point: bestPt, diffMs: minDiff };
+      }
+      return null;
+    },
+
+    /**
+     * クリック位置の近く（18px以内）に既存のポイントがあればその座標にスナップする
+     * @param {L.LatLng} eLatLng
+     * @returns {L.LatLng}
+     */
+    _findSnappedLatLng(eLatLng) {
+      const map = GIS.AppState.map;
+      const clickPt = map.latLngToContainerPoint(eLatLng);
+      let closestLatLng = eLatLng;
+      let minPixelDist = 18;
+
+      map.eachLayer(layer => {
+        if (layer === GIS.AppState.tempMarker) return;
+        if (typeof layer.getLatLng === 'function') {
+          const latLng = layer.getLatLng();
+          const pt = map.latLngToContainerPoint(latLng);
+          const dist = clickPt.distanceTo(pt);
+          if (dist < minPixelDist) {
+            minPixelDist = dist;
+            closestLatLng = latLng;
+          }
+        }
+      });
+
+      return closestLatLng;
     },
 
     /**
