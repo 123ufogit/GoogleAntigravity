@@ -11,6 +11,7 @@
   // ======================================================
   document.addEventListener('DOMContentLoaded', () => {
     initMap();
+    initStatusBar();
     initControls();
     GIS.FloatingPanel.init();
   });
@@ -57,6 +58,38 @@
     GIS.AppState.map = map;
     GIS.AppState._basemaps = basemaps;
     GIS.AppState._currentBasemap = 'standard';
+  }
+
+  /**
+   * マウス座標ステータスバーを初期化する
+   */
+  function initStatusBar() {
+    const map   = GIS.AppState.map;
+    const elCoords = document.getElementById('status-coords');
+    const elZoom   = document.getElementById('status-zoom');
+    if (!elCoords || !elZoom) return;
+
+    // 初期表示
+    const updateZoom = () => {
+      elZoom.textContent = `Zoom ${map.getZoom()}`;
+    };
+    updateZoom();
+
+    // マウスムーブで座標更新
+    map.on('mousemove', (e) => {
+      const { lat, lng } = e.latlng;
+      elCoords.textContent =
+        `${lat >= 0 ? '' : ''}${lat.toFixed(6)}°, ` +
+        `${lng >= 0 ? '' : ''}${lng.toFixed(6)}°`;
+    });
+
+    // 地図外に出たらリセット
+    map.on('mouseout', () => {
+      elCoords.textContent = '— , —';
+    });
+
+    // ズーム変更時
+    map.on('zoomend', updateZoom);
   }
 
   /**
@@ -127,13 +160,26 @@
       document.getElementById('export-format-modal').classList.add('hidden');
     });
 
+    // ❓ ヘルプモーダルを開く
+    document.getElementById('btn-help').addEventListener('click', () => {
+      document.getElementById('help-modal').classList.remove('hidden');
+    });
+    // ヘルプモーダルを閉じる
+    document.getElementById('help-modal-close').addEventListener('click', () => {
+      document.getElementById('help-modal').classList.add('hidden');
+    });
+    document.getElementById('help-modal').addEventListener('click', (e) => {
+      if (e.target === e.currentTarget) {
+        document.getElementById('help-modal').classList.add('hidden');
+      }
+    });
+
     // キーボードショートカット
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
-        // モーダルを閉じる
         document.getElementById('image-modal').classList.add('hidden');
         document.getElementById('export-format-modal').classList.add('hidden');
-        // 位置特定モードをキャンセル
+        document.getElementById('help-modal').classList.add('hidden');
         if (GIS.AppState.locationMode) {
           document.getElementById('location-mode-cancel').click();
         }

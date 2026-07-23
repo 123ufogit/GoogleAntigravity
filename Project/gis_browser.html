@@ -28,6 +28,13 @@
   <!-- ==================== 地図エリア ==================== -->
   <div id="map" role="main" aria-label="地図表示エリア"></div>
 
+  <!-- ==================== マウス座標ステータスバー ==================== -->
+  <div id="map-status-bar" class="map-status-bar" aria-live="polite" aria-label="カーソル座標とズームレベル">
+    <span id="status-coords" class="status-coords">— , —</span>
+    <span class="status-sep">｜</span>
+    <span id="status-zoom" class="status-zoom">Zoom —</span>
+  </div>
+
   <!-- ==================== ベースマップ切り替えツールバー ==================== -->
   <div id="basemap-toolbar" class="basemap-toolbar" role="toolbar" aria-label="ベースマップ選択">
     <button class="basemap-btn active" data-basemap="standard" title="国土地理院 標準地図">
@@ -51,6 +58,7 @@
         <span class="panel-title">GIS Browser</span>
       </div>
       <div class="panel-header-actions">
+        <button id="btn-help" class="panel-icon-btn" title="ヘルプ・利用規約" aria-label="ヘルプを開く">❓</button>
         <button id="panel-toggle" class="panel-icon-btn" title="折りたたむ" aria-label="パネルを折りたたむ">⌃</button>
       </div>
     </div>
@@ -191,6 +199,67 @@
         </button>
       </div>
       <button id="export-format-cancel" class="export-format-cancel">キャンセル</button>
+    </div>
+  </div>
+
+  <!-- ==================== ❓ ヘルプモーダル ==================== -->
+  <div id="help-modal" class="help-modal hidden" role="dialog"
+       aria-label="ヘルプ・利用規約" aria-modal="true">
+    <div class="help-modal-inner">
+      <div class="help-modal-header">
+        <span class="help-modal-title">❓ ヘルプ・ご利用にあたって</span>
+        <button id="help-modal-close" class="modal-close" aria-label="閉じる">✕</button>
+      </div>
+      <div class="help-modal-body">
+
+        <section class="help-section">
+          <h3>📂 対応ファイル形式</h3>
+          <table class="help-table">
+            <tr><td>KML / KMZ</td><td>地物・ライン・ポリゴン</td></tr>
+            <tr><td>GeoJSON</td><td>ポイント・ライン・ポリゴン</td></tr>
+            <tr><td>JPEG / PNG / HEIC</td><td>GPS位置情報付き写真</td></tr>
+            <tr><td>GeoTIFF</td><td>衛星・航空画像ラスター（最大500MB+圧縮）</td></tr>
+          </table>
+        </section>
+
+        <section class="help-section">
+          <h3>🗺️ 基本操作</h3>
+          <ul class="help-list">
+            <li>ファイルをパネル枠または地図へ<strong>ドラッグ＆ドロップ</strong>で読み込み</li>
+            <li>GPS情報のない写真は<strong>撮影位置の特定モード</strong>で地図上にピン留め可能</li>
+            <li>読み込んだレイヤーはパネルから表示切替・削除できます</li>
+            <li>GeoJSON・KML・PDF/PNGへのエクスポートに対応</li>
+            <li><kbd>Esc</kbd> キーでモーダルを閉じます</li>
+          </ul>
+        </section>
+
+        <section class="help-section">
+          <h3>🔒 データの取り扱い</h3>
+          <p class="help-note">読み込んだファイル・写真・位置情報は<strong>すべてお使いのブラウザ内でのみ処理</strong>されます。外部サーバーへのアップロードは一切行いません。</p>
+        </section>
+
+        <section class="help-section">
+          <h3>📜 地図タイルの利用条件</h3>
+          <ul class="help-list attribution-list">
+            <li>
+              <strong>国土地理院（標準地図・空中写真）</strong><br>
+              <a href="https://www.gsi.go.jp/kikakuchousei/kikakuchousei40182.html" target="_blank" rel="noopener">国土地理院コンテンツ利用規約</a> に基づき提供<br>
+              <span class="help-sub">出典：国土地理院タイル / © 国土地理院</span>
+            </li>
+            <li>
+              <strong>OpenStreetMap (OSM)</strong><br>
+              <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap contributors</a><br>
+              <span class="help-sub"><a href="https://opendatacommons.org/licenses/odbl/" target="_blank" rel="noopener">Open Database License (ODbL)</a> に基づき提供</span>
+            </li>
+          </ul>
+        </section>
+
+        <section class="help-section">
+          <h3>⚠️ 免責事項</h3>
+          <p class="help-note">面積・距離の計算値は球面近似による参考値です。法的判断・施工計画等には使用せず、測量専門機関による実測値をご確認ください。</p>
+        </section>
+
+      </div>
     </div>
   </div>
 
